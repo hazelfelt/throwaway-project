@@ -1,192 +1,194 @@
-async function init() {
+(async () => {
 
-    // Canvas, entry.
-    let canvas = document.querySelector('canvas');
-    let entry = navigator.gpu;
-    if (!entry) console.error("Doesn't look like WebGPU is available!");
+// Canvas, entry.
+let canvas = document.querySelector('canvas');
+let entry = navigator.gpu;
+if (!entry) console.error("Doesn't look like WebGPU is available!");
 
-    // Adapter, device, queue.
-    let adapter = await entry.requestAdapter();
-    let device = await adapter.requestDevice();
-    let queue = device.queue;
+// Adapter, device, queue.
+let adapter = await entry.requestAdapter();
+let device = await adapter.requestDevice();
+let queue = device.queue;
 
-    // Canvas context.
-    let context = canvas.getContext('webgpu');
+// Canvas context.
+let context = canvas.getContext('webgpu');
 
-    context.configure({
-        device: device,
-        alphaMode: "opaque",
-        format: 'bgra8unorm',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+context.configure({
+    device: device,
+    alphaMode: "opaque",
+    format: 'bgra8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+});
+
+let depthTexture = device.createTexture({
+    size: [canvas.width, canvas.height, 1],
+    dimension: '2d',
+    format: 'depth24plus-stencil8',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+});
+
+let depthTextureView = depthTexture.createView();
+
+// Buffers.
+let createBuffer = (arr, usage) => {
+    let buffer = device.createBuffer({
+        size: (arr.byteLength + 3) & ~3, // align to 4 bytes
+        usage,
+        mappedAtCreation: true
     });
 
-    let depthTexture = device.createTexture({
-        size: [canvas.width, canvas.height, 1],
-        dimension: '2d',
-        format: 'depth24plus-stencil8',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
-    });
+    const writeArray = arr instanceof Uint16Array
+            ? new Uint16Array(buffer.getMappedRange())
+            : new Float32Array(buffer.getMappedRange());
 
-    let depthTextureView = depthTexture.createView();
+    writeArray.set(arr);
+    buffer.unmap();
+    return buffer;
+};
 
-    // Buffers.
-    let createBuffer = (arr, usage) => {
-        let buffer = device.createBuffer({
-            size: (arr.byteLength + 3) & ~3, // align to 4 bytes
-            usage,
-            mappedAtCreation: true
-        });
+let positionBuffer = createBuffer(new Float32Array([
+    1.0, -1.0, 0.0,
+    -1.0, -1.0, 0.0,
+    0.0, 1.0, 0.0
+]), GPUBufferUsage.VERTEX);
 
-        const writeArray = arr instanceof Uint16Array
-                ? new Uint16Array(buffer.getMappedRange())
-                : new Float32Array(buffer.getMappedRange());
+let colorBuffer = createBuffer(new Float32Array([
+    1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0
+]), GPUBufferUsage.VERTEX);
 
-        writeArray.set(arr);
-        buffer.unmap();
-        return buffer;
-    };
+let indexBuffer = createBuffer(new Uint16Array([
+    0, 1, 2
+]), GPUBufferUsage.INDEX);
 
-    let positionBuffer = createBuffer(new Float32Array([
-        1.0, -1.0, 0.0,
-        -1.0, -1.0, 0.0,
-        0.0, 1.0, 0.0
-    ]), GPUBufferUsage.VERTEX);
+// Shaders.
+const vertWgsl = `
+struct VSOut {
+    @builtin(position) Position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
 
-    let colorBuffer = createBuffer(new Float32Array([
-        1.0, 0.0, 0.0,
-        0.0, 1.0, 0.0,
-        0.0, 0.0, 1.0
-    ]), GPUBufferUsage.VERTEX);
+@vertex
+fn main(@location(0) inPos: vec3<f32>,
+        @location(1) inColor: vec3<f32>) -> VSOut {
+    var vsOut: VSOut;
+    vsOut.Position = vec4<f32>(inPos, 1.0);
+    vsOut.color = inColor;
+    return vsOut;
+}`;
 
-    let indexBuffer = createBuffer(new Uint16Array([
-        0, 1, 2
-    ]), GPUBufferUsage.INDEX);
+const fragWgsl = `
+@fragment
+fn main(@location(0) inColor: vec3<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(inColor, 1.0);
+}
+`;
 
-    // Shaders.
-    const vertWgsl = `
-    struct VSOut {
-        @builtin(position) Position: vec4<f32>,
-        @location(0) color: vec3<f32>,
-    };
+let vertModule = device.createShaderModule({ code: vertWgsl });
+let fragModule = device.createShaderModule({ code: fragWgsl });
 
-    @vertex
-    fn main(@location(0) inPos: vec3<f32>,
-            @location(1) inColor: vec3<f32>) -> VSOut {
-        var vsOut: VSOut;
-        vsOut.Position = vec4<f32>(inPos, 1.0);
-        vsOut.color = inColor;
-        return vsOut;
-    }`;
+// Pipeline.
+let pipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [] }),
 
-    const fragWgsl = `
-    @fragment
-    fn main(@location(0) inColor: vec3<f32>) -> @location(0) vec4<f32> {
-        return vec4<f32>(inColor, 1.0);
+    vertex: {
+        module: vertModule,
+        entryPoint: 'main',
+        buffers: [
+
+            { // Position buffer.
+                attributes: [{
+                    shaderLocation: 0, // [[attribute(0)]]
+                    offset: 0,
+                    format: 'float32x3'
+                }],
+                arrayStride: 4 * 3, // sizeof(float) * 3
+                stepMode: 'vertex'
+            },
+
+            { // Color buffer.
+                attributes: [{
+                    shaderLocation: 1, // [[attribute(1)]]
+                    offset: 0,
+                    format: 'float32x3'
+                }],
+                arrayStride: 4 * 3, // sizeof(float) * 3
+                stepMode: 'vertex'
+            }
+        ]
+    },
+
+    fragment: {
+        module: fragModule,
+        entryPoint: 'main',
+        targets: [{ // color state
+            format: 'bgra8unorm',
+            writeMask: GPUColorWrite.ALL
+        }]
+    },
+
+    primitive: {
+        frontFace: 'cw',
+        cullMode: 'none',
+        topology: 'triangle-list'
+    },
+
+    depthStencil: {
+        depthWriteEnabled: true,
+        depthCompare: 'less',
+        format: 'depth24plus-stencil8'
     }
-    `;
+});
 
-    let vertModule = device.createShaderModule({ code: vertWgsl });
-    let fragModule = device.createShaderModule({ code: fragWgsl });
+// Render.
+let render = () => {
 
-    // Pipeline.
-    let pipeline = device.createRenderPipeline({
-        layout: device.createPipelineLayout({ bindGroupLayouts: [] }),
+    // Encode drawing commands.
+    let commandEncoder = device.createCommandEncoder();
+    let passEncoder = commandEncoder.beginRenderPass({
 
-        vertex: {
-            module: vertModule,
-            entryPoint: 'main',
-            buffers: [
+        colorAttachments: [{
+            view: context.getCurrentTexture().createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            loadOp: 'clear',
+            storeOp: 'store'
+        }],
 
-                { // Position buffer.
-                    attributes: [{
-                        shaderLocation: 0, // [[attribute(0)]]
-                        offset: 0,
-                        format: 'float32x3'
-                    }],
-                    arrayStride: 4 * 3, // sizeof(float) * 3
-                    stepMode: 'vertex'
-                },
-
-                { // Color buffer.
-                    attributes: [{
-                        shaderLocation: 1, // [[attribute(1)]]
-                        offset: 0,
-                        format: 'float32x3'
-                    }],
-                    arrayStride: 4 * 3, // sizeof(float) * 3
-                    stepMode: 'vertex'
-                }
-            ]
-        },
-
-        fragment: {
-            module: fragModule,
-            entryPoint: 'main',
-            targets: [{ // color state
-                format: 'bgra8unorm',
-                writeMask: GPUColorWrite.ALL
-            }]
-        },
-
-        primitive: {
-            frontFace: 'cw',
-            cullMode: 'none',
-            topology: 'triangle-list'
-        },
-
-        depthStencil: {
-            depthWriteEnabled: true,
-            depthCompare: 'less',
-            format: 'depth24plus-stencil8'
+        depthStencilAttachment: {
+            view: depthTextureView,
+            depthClearValue: 1,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+            stencilClearValue: 0,
+            stencilLoadOp: 'clear',
+            stencilStoreOp: 'store',
         }
     });
 
-    // Render.
-    let render = () => {
+    passEncoder.setPipeline(pipeline);
+    passEncoder.setViewport(
+        0, 0,
+        canvas.width, canvas.height,
+        0, 1
+    );
+    passEncoder.setScissorRect(
+        0, 0,
+        canvas.width, canvas.height
+    );
+    passEncoder.setVertexBuffer(0, positionBuffer);
+    passEncoder.setVertexBuffer(1, colorBuffer);
+    passEncoder.setIndexBuffer(indexBuffer, 'uint16');
+    passEncoder.drawIndexed(3, 1);
+    passEncoder.end();
 
-        // Encode drawing commands.
-        let passEncoder = device.createCommandEncoder().beginRenderPass({
+    queue.submit([commandEncoder.finish()]);
 
-            colorAttachments: [{
-                view: context.getCurrentTexture().createView(),
-                clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                loadOp: 'clear',
-                storeOp: 'store'
-            }],
-
-            depthStencilAttachment: {
-                view: depthTextureView,
-                depthClearValue: 1,
-                depthLoadOp: 'clear',
-                depthStoreOp: 'store',
-                stencilClearValue: 0,
-                stencilLoadOp: 'clear',
-                stencilStoreOp: 'store',
-            }
-        });
-
-        passEncoder.setPipeline(pipeline);
-        passEncoder.setViewport(
-            0, 0,
-            canvas.width, canvas.height,
-            0, 1
-        );
-        passEncoder.setScissorRect(
-            0, 0,
-            canvas.width, canvas.height
-        );
-        passEncoder.setVertexBuffer(0, positionBuffer);
-        passEncoder.setVertexBuffer(1, colorBuffer);
-        passEncoder.setIndexBuffer(indexBuffer, 'uint16');
-        passEncoder.drawIndexed(3, 1);
-        passEncoder.end();
-
-        queue.submit([commandEncoder.finish()]);
-
-        requestAnimationFrame(render); // refresh canvas
-    }
-
-    render();
+    requestAnimationFrame(render); // refresh canvas
 }
 
-init();
+render();
+
+})().catch(err => {
+    console.error(err)
+});
