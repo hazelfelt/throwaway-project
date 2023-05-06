@@ -88,12 +88,7 @@ async function init() {
     let vertModule = device.createShaderModule({ code: vertWgsl });
     let fragModule = device.createShaderModule({ code: fragWgsl });
 
-    // Color/blend state.
-    const colorState = {
-        format: 'bgra8unorm',
-        writeMask: GPUColorWrite.ALL
-    };
-
+    // Pipeline.
     let pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: [] }),
 
@@ -127,7 +122,10 @@ async function init() {
         fragment: {
             module: fragModule,
             entryPoint: 'main',
-            targets: [colorState]
+            targets: [{ // color state
+                format: 'bgra8unorm',
+                writeMask: GPUColorWrite.ALL
+            }]
         },
 
         primitive: {
@@ -143,14 +141,11 @@ async function init() {
         }
     });
 
-    // Render
+    // Render.
     let render = () => {
 
-        // Write and submit commands to queue.
-        let commandEncoder = device.createCommandEncoder();
-
         // Encode drawing commands.
-        let passEncoder = commandEncoder.beginRenderPass({
+        let passEncoder = device.createCommandEncoder().beginRenderPass({
 
             colorAttachments: [{
                 view: context.getCurrentTexture().createView(),
