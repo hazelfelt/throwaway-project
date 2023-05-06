@@ -1,14 +1,13 @@
 (async () => {
 
-// Canvas, entry.
+// Canvas and entry.
 let canvas = document.querySelector('canvas');
 let entry = navigator.gpu;
 if (!entry) console.error("Doesn't look like WebGPU is available!");
 
-// Adapter, device, queue.
+// Adapter and device.
 let adapter = await entry.requestAdapter();
 let device = await adapter.requestDevice();
-let queue = device.queue;
 
 // Canvas context.
 let context = canvas.getContext('webgpu');
@@ -182,7 +181,7 @@ let render = () => {
     passEncoder.drawIndexed(3, 1);
     passEncoder.end();
 
-    queue.submit([commandEncoder.finish()]);
+    device.queue.submit([commandEncoder.finish()]);
 
     requestAnimationFrame(render); // refresh canvas
 }

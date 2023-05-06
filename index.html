@@ -4,20 +4,22 @@
     <script src="script.js" async></script>
     <style>
         html {
+            /* make the html document take the whole page's length, not just a fraction of it. */
+            /* (needed to vertically center the canvas) */
             height: 100%
         }
         body {
-            margin: 0;
+            margin: 0;      /* there's a tiny margin around the body by default, so remove it */
             background-color: darkslategray;
-            display: flex;
+            display: flex;  /* lets me center the canvas vertically */
             height: 100%;
         }
         canvas {
             background-color: whitesmoke;
             width: 600px;
             height: 400px;
-            margin: auto;
-            display: block;
+            margin: auto;   /* center horizontally and vertically */
+            display: block; /* ...to work with the body's `display: flex`, i guess? ill check later */
         }
     </style>
 </head>
