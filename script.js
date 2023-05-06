@@ -1,34 +1,25 @@
 (async () => {
 
-// Canvas and entry.
-let canvas = document.querySelector('canvas');
-let entry = navigator.gpu;
-if (!entry) console.error("Doesn't look like WebGPU is available!");
+if (!navigator.gpu) throw new Error("Doesn't look like WebGPU is available!");
 
-// Adapter and device.
-let adapter = await entry.requestAdapter();
+// Adapter, device, and canvas context.
+let adapter = await navigator.gpu.requestAdapter();
 let device = await adapter.requestDevice();
 
-// Canvas context.
+let canvas = document.querySelector('canvas');
+canvas.width = canvas.clientWidth;
+canvas.height = canvas.clientHeight;
+
 let context = canvas.getContext('webgpu');
 
 context.configure({
-    device: device,
-    alphaMode: "opaque",
-    format: 'bgra8unorm',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+    device,
+    format: navigator.gpu.getPreferredCanvasFormat(),
+    alphaMode: "premultiplied",
 });
-
-let depthTexture = device.createTexture({
-    size: [canvas.width, canvas.height, 1],
-    dimension: '2d',
-    format: 'depth24plus-stencil8',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
-});
-
-let depthTextureView = depthTexture.createView();
 
 // Buffers.
+// (i dont get how this code works, especially the `writeArray` bit.)
 let createBuffer = (arr, usage) => {
     let buffer = device.createBuffer({
         size: (arr.byteLength + 3) & ~3, // align to 4 bytes
@@ -61,44 +52,39 @@ let indexBuffer = createBuffer(new Uint16Array([
     0, 1, 2
 ]), GPUBufferUsage.INDEX);
 
-// Shaders.
-const vertWgsl = `
-struct VSOut {
-    @builtin(position) Position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+// Shader.
+let shaderModule = device.createShaderModule({ code: `
+struct VertexOut {
+    @builtin(position) position: vec4f,
+    @location(0) color: vec3f,
 };
 
 @vertex
-fn main(@location(0) inPos: vec3<f32>,
-        @location(1) inColor: vec3<f32>) -> VSOut {
-    var vsOut: VSOut;
-    vsOut.Position = vec4<f32>(inPos, 1.0);
-    vsOut.color = inColor;
-    return vsOut;
-}`;
-
-const fragWgsl = `
-@fragment
-fn main(@location(0) inColor: vec3<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(inColor, 1.0);
+fn vert_main(@location(0) position: vec3f,
+             @location(1) color: vec3f) -> VertexOut {
+    var out: VertexOut;
+    out.position = vec4f(position, 1.0);
+    out.color = color;
+    return out;
 }
-`;
 
-let vertModule = device.createShaderModule({ code: vertWgsl });
-let fragModule = device.createShaderModule({ code: fragWgsl });
+@fragment
+fn frag_main(@location(0) color: vec3f) -> @location(0) vec4f {
+    return vec4f(color, 1.0);
+}` });
 
 // Pipeline.
 let pipeline = device.createRenderPipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: [] }),
 
     vertex: {
-        module: vertModule,
-        entryPoint: 'main',
+        module: shaderModule,
+        entryPoint: 'vert_main',
         buffers: [
 
             { // Position buffer.
                 attributes: [{
-                    shaderLocation: 0, // [[attribute(0)]]
+                    shaderLocation: 0,
                     offset: 0,
                     format: 'float32x3'
                 }],
@@ -108,7 +94,7 @@ let pipeline = device.createRenderPipeline({
 
             { // Color buffer.
                 attributes: [{
-                    shaderLocation: 1, // [[attribute(1)]]
+                    shaderLocation: 1,
                     offset: 0,
                     format: 'float32x3'
                 }],
@@ -119,8 +105,8 @@ let pipeline = device.createRenderPipeline({
     },
 
     fragment: {
-        module: fragModule,
-        entryPoint: 'main',
+        module: shaderModule,
+        entryPoint: 'frag_main',
         targets: [{ // color state
             format: 'bgra8unorm',
             writeMask: GPUColorWrite.ALL
@@ -132,37 +118,22 @@ let pipeline = device.createRenderPipeline({
         cullMode: 'none',
         topology: 'triangle-list'
     },
-
-    depthStencil: {
-        depthWriteEnabled: true,
-        depthCompare: 'less',
-        format: 'depth24plus-stencil8'
-    }
 });
 
 // Render.
 let render = () => {
 
-    // Encode drawing commands.
+    // Command encoder.
     let commandEncoder = device.createCommandEncoder();
-    let passEncoder = commandEncoder.beginRenderPass({
 
+    // Render pass.
+    let passEncoder = commandEncoder.beginRenderPass({
         colorAttachments: [{
             view: context.getCurrentTexture().createView(),
             clearValue: { r: 0, g: 0, b: 0, a: 1 },
             loadOp: 'clear',
             storeOp: 'store'
-        }],
-
-        depthStencilAttachment: {
-            view: depthTextureView,
-            depthClearValue: 1,
-            depthLoadOp: 'clear',
-            depthStoreOp: 'store',
-            stencilClearValue: 0,
-            stencilLoadOp: 'clear',
-            stencilStoreOp: 'store',
-        }
+        }]
     });
 
     passEncoder.setPipeline(pipeline);
@@ -181,6 +152,7 @@ let render = () => {
     passEncoder.drawIndexed(3, 1);
     passEncoder.end();
 
+    // We're done -- submit a command buffer formed from the `commandEncoder`.
     device.queue.submit([commandEncoder.finish()]);
 
     requestAnimationFrame(render); // refresh canvas
