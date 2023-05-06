@@ -80,6 +80,18 @@ async function main() {
     }
 
     render();
+
+    const observer = new ResizeObserver(entries => {
+        const entry = entries[0];
+        const canvas = entry.target;
+        const width = entry.contentBoxSize[0].inlineSize;
+        const height = entry.contentBoxSize[0].blockSize;
+        canvas.width = Math.min(width, device.limits.maxTextureDimension2D);
+        canvas.height = Math.min(height, device.limits.maxTextureDimension2D);
+        render();
+    });
+
+    observer.observe(canvas);
 }
 
 main().catch(err => {
