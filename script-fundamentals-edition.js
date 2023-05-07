@@ -15,29 +15,51 @@ async function main() {
     });
 
     const module = device.createShaderModule({
-        label: 'red triangle shader',
+        label: 'hardcoded shape shader',
         code: `
             @vertex fn vs(
                 @builtin(vertex_index) vertexIndex : u32
             ) -> @builtin(position) vec4f {
 
-                var pos = array<vec2f, 3>(
-                    vec2f( 0.0,  0.5),  // top center
-                    vec2f(-0.5, -0.5),  // bottom left
-                    vec2f( 0.5, -0.5)   // bottom right
+                // i made this shape by hand using ms paint and excel :)
+                // fun little exercise. never again
+                var pos = array<vec2f, 18>(
+                    vec2f(-0.14, -0.04), // 1
+                    vec2f( 0.84,  0.80), // 2
+                    vec2f( 0.74, -0.86), // 3
+
+                    vec2f(-0.14, -0.04), // 1
+                    vec2f( 0.74, -0.86), // 3
+                    vec2f(-0.6,  -0.84), // 4
+
+                    vec2f(-0.14, -0.04), // 1
+                    vec2f(-0.6,  -0.84), // 4
+                    vec2f(-0.6,  -0.46), // 5
+
+                    vec2f(-0.6,  -0.46), // 5
+                    vec2f(-0.82, -0.70), // 6
+                    vec2f(-0.92,  0.86), // 7
+
+                    vec2f(-0.14, -0.04), // 1
+                    vec2f(-0.6,  -0.46), // 5
+                    vec2f(-0.92,  0.86), // 7
+
+                    vec2f(-0.14, -0.04), // 1
+                    vec2f(-0.92,  0.86), // 7
+                    vec2f( 0.36,  0.92), // 8
                 );
 
                 return vec4f(pos[vertexIndex], 0.0, 1.0);
             }
 
             @fragment fn fs() -> @location(0) vec4f {
-                return vec4f(0.1, 0.75, 0.5, 1.0);
+                return vec4f(0.0, 0.0, 0.0, 1.0);
             }
         `,
     });
 
     const pipeline = device.createRenderPipeline({
-        label: 'red triangle pipeline',
+        label: 'hardcoded shape pipeline',
         layout: 'auto',
         vertex: {
             module,
@@ -64,7 +86,7 @@ async function main() {
                     // Get the current texture from the canvas context and
                     // set it as the texture to render to
                     view: context.getCurrentTexture().createView(),
-                    clearValue: [0.3, 0.3, 0.3, 1],
+                    clearValue: [1.0, 1.0, 1.0, 1.0],
                     loadOp: 'clear',
                     storeOp: 'store',
                 },
@@ -72,7 +94,7 @@ async function main() {
         });
 
         pass.setPipeline(pipeline);
-        pass.draw(3);  // call our vertex shader 3 times
+        pass.draw(18);  // call our vertex shader 3 times
         pass.end();
 
         // We're done -- submit a command buffer formed from the `encoder`.
