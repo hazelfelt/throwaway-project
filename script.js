@@ -1,165 +1,107 @@
+// this script (mostly) follows the tutorial from https://webgpufundamentals.org
 (async () => {
 
-if (!navigator.gpu) throw new Error("Doesn't look like WebGPU is available!");
+const adapter = await navigator.gpu?.requestAdapter();
+const device = await adapter?.requestDevice();
+if (!device) throw new Error('need a browser that supports WebGPU');
 
-// Adapter, device, and canvas context.
-let adapter = await navigator.gpu.requestAdapter();
-let device = await adapter.requestDevice();
-
-let canvas = document.querySelector('canvas');
+// Get a WebGPU context from the canvas and configure it.
+const canvas = document.querySelector('canvas');
 canvas.width = canvas.clientWidth;
 canvas.height = canvas.clientHeight;
 
-let context = canvas.getContext('webgpu');
-
+const context = canvas.getContext('webgpu');
+const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
 context.configure({
     device,
-    format: navigator.gpu.getPreferredCanvasFormat(),
-    alphaMode: "premultiplied",
+    format: canvasFormat,
 });
 
-// Buffers.
-// (i dont get how this code works, especially the `writeArray` bit.)
-let createBuffer = (arr, usage) => {
-    let buffer = device.createBuffer({
-        size: (arr.byteLength + 3) & ~3, // align to 4 bytes
-        usage,
-        mappedAtCreation: true
-    });
-
-    const writeArray = arr instanceof Uint16Array
-            ? new Uint16Array(buffer.getMappedRange())
-            : new Float32Array(buffer.getMappedRange());
-
-    writeArray.set(arr);
-    buffer.unmap();
-    return buffer;
-};
-
-let positionBuffer = createBuffer(new Float32Array([
-    1.0, -1.0, 0.0,
-    -1.0, -1.0, 0.0,
-    0.0, 1.0, 0.0
-]), GPUBufferUsage.VERTEX);
-
-let colorBuffer = createBuffer(new Float32Array([
-    1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0,
-    0.0, 0.0, 1.0
-]), GPUBufferUsage.VERTEX);
-
-let indexBuffer = createBuffer(new Uint16Array([
-    0, 1, 2
-]), GPUBufferUsage.INDEX);
-
-// Shader.
-let shaderModule = device.createShaderModule({ code: `
+const wgsl = `
 struct VertexOut {
     @builtin(position) position: vec4f,
-    @location(0) color: vec3f,
+    @location(12) color: vec4f,
 };
 
-@vertex
-fn vert_main(@location(0) position: vec3f,
-             @location(1) color: vec3f) -> VertexOut {
+@vertex fn vs(
+    @builtin(vertex_index) index : u32
+) -> VertexOut {
+
+    var position = array<vec2f, 3>(
+        vec2f( 0.0,  0.5),  // top center
+        vec2f(-0.5, -0.5),  // bottom left
+        vec2f( 0.5, -0.5)   // bottom right
+    );
+
+    var color = array<vec4f, 3>(
+        vec4f(1.0, 0.0, 0.0, 1.0), // red
+        vec4f(0.0, 1.0, 0.0, 1.0), // green
+        vec4f(0.0, 0.0, 1.0, 1.0), // blue
+    );
+
     var out: VertexOut;
-    out.position = vec4f(position, 1.0);
-    out.color = color;
+    out.position = vec4f(position[index], 0.0, 1.0);
+    out.color = color[index];
+
     return out;
 }
 
-@fragment
-fn frag_main(@location(0) color: vec3f) -> @location(0) vec4f {
-    return vec4f(color, 1.0);
-}` });
+@fragment fn fs(input: VertexOut) -> @location(0) vec4f {
+    let grid_coords = vec2u(input.position.xy) / 32u;
+    let square_type = (grid_coords.x + grid_coords.y) % 2u == 0u;
+    return input.color * select(3.0, 2.0, square_type);
+}`;
 
-// Pipeline.
-let pipeline = device.createRenderPipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [] }),
+const module = device.createShaderModule({
+    label: 'grid triangle shader',
+    code: wgsl,
+});
 
+const pipeline = device.createRenderPipeline({
+    label: 'grid triangle pipeline',
+    layout: 'auto',
     vertex: {
-        module: shaderModule,
-        entryPoint: 'vert_main',
-        buffers: [
-
-            { // Position buffer.
-                attributes: [{
-                    shaderLocation: 0,
-                    offset: 0,
-                    format: 'float32x3'
-                }],
-                arrayStride: 4 * 3, // sizeof(float) * 3
-                stepMode: 'vertex'
-            },
-
-            { // Color buffer.
-                attributes: [{
-                    shaderLocation: 1,
-                    offset: 0,
-                    format: 'float32x3'
-                }],
-                arrayStride: 4 * 3, // sizeof(float) * 3
-                stepMode: 'vertex'
-            }
-        ]
+        module,
+        entryPoint: 'vs',
     },
-
     fragment: {
-        module: shaderModule,
-        entryPoint: 'frag_main',
-        targets: [{ // color state
-            format: 'bgra8unorm',
-            writeMask: GPUColorWrite.ALL
-        }]
-    },
-
-    primitive: {
-        frontFace: 'cw',
-        cullMode: 'none',
-        topology: 'triangle-list'
+        module,
+        entryPoint: 'fs',
+        targets: [{ format: canvasFormat }],
     },
 });
 
-// Render.
-let render = () => {
+
+function render() {
 
     // Command encoder.
-    let commandEncoder = device.createCommandEncoder();
+    const encoder = device.createCommandEncoder({ label: 'encoder' });
 
     // Render pass.
-    let passEncoder = commandEncoder.beginRenderPass({
-        colorAttachments: [{
-            view: context.getCurrentTexture().createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: 'clear',
-            storeOp: 'store'
-        }]
+    const pass = encoder.beginRenderPass({
+        label: 'render pass',
+        colorAttachments: [
+            {
+                // Get the current texture from the canvas context and
+                // set it as the texture to render to
+                view: context.getCurrentTexture().createView(),
+                clearValue: [1.0, 1.0, 1.0, 1.0],
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+        ],
     });
 
-    passEncoder.setPipeline(pipeline);
-    passEncoder.setViewport(
-        0, 0,
-        canvas.width, canvas.height,
-        0, 1
-    );
-    passEncoder.setScissorRect(
-        0, 0,
-        canvas.width, canvas.height
-    );
-    passEncoder.setVertexBuffer(0, positionBuffer);
-    passEncoder.setVertexBuffer(1, colorBuffer);
-    passEncoder.setIndexBuffer(indexBuffer, 'uint16');
-    passEncoder.drawIndexed(3, 1);
-    passEncoder.end();
+    pass.setPipeline(pipeline);
+    pass.draw(3);  // call our vertex shader 3 times
+    pass.end();
 
-    // We're done -- submit a command buffer formed from the `commandEncoder`.
-    device.queue.submit([commandEncoder.finish()]);
-
-    requestAnimationFrame(render); // refresh canvas
+    // We're done -- submit a command buffer formed from the `encoder`.
+    device.queue.submit([encoder.finish()]);
 }
 
 render();
 
 })().catch(err => {
-    console.error(err)
+    console.error(err);
 });

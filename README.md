@@ -6,6 +6,7 @@ if I push changes here long enough maybe i'll change that
 
 ---
 
-the `script.js` file is essentially stolen from [alain galvan's blog on Raw WebGPU](https://alain.xyz/blog/raw-webgpu),
-except the syntax is modified a decent bit \
-i'd use the MDN WebGPU reference, however that demo doesn't seem to work on Firefox nightly.
+i'm currently following [webgpufundamentals.org's](https://webgpufundamentals.org) tutorial in `script.js`
+
+the `script-alain-edition.js` file is essentially stolen from [alain galvan's blog on Raw WebGPU](https://alain.xyz/blog/raw-webgpu),
+except the syntax is modified a decent bit
