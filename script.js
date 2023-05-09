@@ -1,11 +1,13 @@
 // this script (mostly) follows the tutorial from https://webgpufundamentals.org
-(async () => {
 
+async function main() {
+
+// Adapter, device.
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
 if (!device) throw new Error('need a browser that supports WebGPU');
 
-// Get a WebGPU context from the canvas and configure it.
+// Canvas and WebGPU context.
 const canvas = document.querySelector('canvas');
 canvas.width = canvas.clientWidth;
 canvas.height = canvas.clientHeight;
@@ -17,6 +19,7 @@ context.configure({
     format: canvasFormat,
 });
 
+// Shader.
 const wgsl = `
 struct VertexOut {
     @builtin(position) position: vec4f,
@@ -57,6 +60,7 @@ const module = device.createShaderModule({
     code: wgsl,
 });
 
+// Pipeline.
 const pipeline = device.createRenderPipeline({
     label: 'grid triangle pipeline',
     layout: 'auto',
@@ -71,37 +75,31 @@ const pipeline = device.createRenderPipeline({
     },
 });
 
+// Command encoder and render pass.
+const encoder = device.createCommandEncoder({ label: 'encoder' });
+const pass = encoder.beginRenderPass({
+    label: 'render pass',
+    colorAttachments: [
+        {
+            // Get the current texture from the canvas context and
+            // set it as the texture to render to
+            view: context.getCurrentTexture().createView(),
+            clearValue: [1.0, 1.0, 1.0, 1.0],
+            loadOp: 'clear',
+            storeOp: 'store',
+        },
+    ],
+});
 
-function render() {
+pass.setPipeline(pipeline);
+pass.draw(3);  // call our vertex shader 3 times
+pass.end();
 
-    // Command encoder.
-    const encoder = device.createCommandEncoder({ label: 'encoder' });
+// We're done -- submit a command buffer formed from the `encoder`.
+device.queue.submit([encoder.finish()]);
 
-    // Render pass.
-    const pass = encoder.beginRenderPass({
-        label: 'render pass',
-        colorAttachments: [
-            {
-                // Get the current texture from the canvas context and
-                // set it as the texture to render to
-                view: context.getCurrentTexture().createView(),
-                clearValue: [1.0, 1.0, 1.0, 1.0],
-                loadOp: 'clear',
-                storeOp: 'store',
-            },
-        ],
-    });
-
-    pass.setPipeline(pipeline);
-    pass.draw(3);  // call our vertex shader 3 times
-    pass.end();
-
-    // We're done -- submit a command buffer formed from the `encoder`.
-    device.queue.submit([encoder.finish()]);
 }
 
-render();
-
-})().catch(err => {
+main().catch(err => {
     console.error(err);
 });
