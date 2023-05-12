@@ -66,28 +66,40 @@ const pipeline = device.createRenderPipeline({
     },
 });
 
-// Uniform buffer.
+// Uniform buffers, bind groups.
+const objectCount = 3;
+
 const uniformBufferSize = 4*4 + 2*4 + 2*4;
-const uniformBuffer = device.createBuffer({
-    size: 4*4 + 2*4 + 2*4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-});
+const uniformBuffers = [];
+const bindGroups = [];
 
-const uniformValues = new Float32Array(uniformBufferSize / 4);
-uniformValues.set([0, 1, 0, 1], 0); // color
-uniformValues.set([2.0, 2.0], 4) // scale
-uniformValues.set([-0.5, -0.25], 6); // offset
-device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+for (let i = 0; i < objectCount; ++i) {
 
-// Bind group.
-const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-        { binding: 0, resource: { buffer: uniformBuffer }},
-    ],
-});
+    // Uniform buffer and its data.
+    const buffer = device.createBuffer({
+        size: uniformBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    uniformBuffers.push(buffer);
 
-// Command encoder and render pass.
+    const values = new Float32Array(uniformBufferSize / 4);
+    values.set([0.1 + i*0.1, 0.3 + i*0.1, 0.7 + i*0.1, 1], 0); // color
+    values.set([2.0 - i*0.7, 2.0 - i*0.7], 4) // scale
+    values.set([-0.5 + 0.4*i, -0.25], 6); // offset
+    device.queue.writeBuffer(buffer, 0, values);
+
+    // Triangle-specific bind group.
+    const bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: buffer }},
+        ],
+    });
+    bindGroups.push(bindGroup);
+
+}
+
+// Command encoder, render pass.
 const encoder = device.createCommandEncoder({ label: 'encoder' });
 const pass = encoder.beginRenderPass({
     label: 'render pass',
@@ -104,8 +116,10 @@ const pass = encoder.beginRenderPass({
 });
 
 pass.setPipeline(pipeline);
-pass.setBindGroup(0, bindGroup);
-pass.draw(3);  // call our vertex shader 3 times
+for (let i = 0; i < objectCount; ++i) {
+    pass.setBindGroup(0, bindGroups[i]);
+    pass.draw(3);  // call our vertex shader 3 times
+}
 pass.end();
 
 // We're done -- submit a command buffer formed from the `encoder`.
