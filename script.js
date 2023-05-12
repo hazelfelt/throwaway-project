@@ -67,7 +67,7 @@ const pipeline = device.createRenderPipeline({
 });
 
 // Uniform buffers, bind groups.
-const objectCount = 3;
+const objectCount = 10;
 
 const uniformBufferSize = 4*4 + 2*4 + 2*4;
 const uniformBuffers = [];
@@ -84,8 +84,8 @@ for (let i = 0; i < objectCount; ++i) {
 
     const values = new Float32Array(uniformBufferSize / 4);
     values.set([0.1 + i*0.1, 0.3 + i*0.1, 0.7 + i*0.1, 1], 0); // color
-    values.set([2.0 - i*0.7, 2.0 - i*0.7], 4) // scale
-    values.set([-0.5 + 0.4*i, -0.25], 6); // offset
+    values.set([2.0 - i*0.2, 2.0 - i*0.2], 4) // scale
+    values.set([-0.5 + 0.08*i, -0.25], 6); // offset
     device.queue.writeBuffer(buffer, 0, values);
 
     // Triangle-specific bind group.
