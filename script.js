@@ -2,10 +2,14 @@
 
 async function main() {
 
+
+
 // Adapter, device.
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
 if (!device) throw new Error('need a browser that supports WebGPU');
+
+
 
 // Canvas and WebGPU context.
 const canvas = document.querySelector('canvas');
@@ -18,6 +22,8 @@ context.configure({
     device,
     format: canvasFormat,
 });
+
+
 
 // Shader.
 const wgsl = `
@@ -51,6 +57,8 @@ const module = device.createShaderModule({
     code: wgsl,
 });
 
+
+
 // Pipeline.
 const pipeline = device.createRenderPipeline({
     label: 'grid triangle pipeline',
@@ -65,6 +73,8 @@ const pipeline = device.createRenderPipeline({
         targets: [{ format: canvasFormat }],
     },
 });
+
+
 
 // Uniform buffers, bind groups.
 const objectCount = 10;
@@ -99,6 +109,8 @@ for (let i = 0; i < objectCount; ++i) {
 
 }
 
+
+
 // Command encoder, render pass.
 const encoder = device.createCommandEncoder({ label: 'encoder' });
 const pass = encoder.beginRenderPass({
@@ -121,6 +133,8 @@ for (let i = 0; i < objectCount; ++i) {
     pass.draw(3);  // call our vertex shader 3 times
 }
 pass.end();
+
+
 
 // We're done -- submit a command buffer formed from the `encoder`.
 device.queue.submit([encoder.finish()]);
