@@ -54,7 +54,7 @@ struct UniformStruct {
 }`;
 
 const module = device.createShaderModule({
-    label: 'grid triangle shader',
+    label: "it's a shader!",
     code: wgsl,
 });
 
@@ -62,7 +62,7 @@ const module = device.createShaderModule({
 
 // Pipeline.
 const pipeline = device.createRenderPipeline({
-    label: 'grid triangle pipeline',
+    label: "it's a pipeline!",
     layout: 'auto',
     vertex: {
         module,
