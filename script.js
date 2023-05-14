@@ -26,7 +26,7 @@ context.configure({
 
 
 // Shader.
-// (TODO: understand WGSL better)
+// (i'm just having fun before i write things better)
 const wgsl = `
 struct Triangle {
     color: vec4f,
@@ -42,7 +42,7 @@ struct VSOut {
 @group(0) @binding(0) var<storage, read> triangles: array<Triangle>;
 @group(0) @binding(1) var<uniform> color_offset: vec4f;
 
-@vertex fn vs(
+@vertex fn main_vertex(
     @builtin(vertex_index) index: u32,
     @builtin(instance_index) instance_index: u32
 ) -> VSOut {
@@ -53,14 +53,20 @@ struct VSOut {
         vec2f( 0.5, -0.5)   // bottom right
     );
 
+    var color = array<vec3f, 3>(
+        vec3f( 0.0,  0.2, 0.0),  // top center
+        vec3f( 0.0,  0.5, 0.0),  // bottom left
+        vec3f( 0.0,  -0.2, 0.0)   // bottom right
+    );
+
     let triangle = triangles[instance_index];
     var out: VSOut;
-    out.color = triangle.color;
+    out.color = triangle.color + vec4f(color[index], 1.0);
     out.position = vec4f(position[index] * triangle.scale + triangle.offset, 0.0, 1.0);
     return out;
 }
 
-@fragment fn fs(input: VSOut) -> @location(0) vec4f {
+@fragment fn main_fragment(input: VSOut) -> @location(0) vec4f {
     return input.color + color_offset;
 }`;
 
@@ -77,11 +83,11 @@ const pipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: {
         module,
-        entryPoint: 'vs',
+        entryPoint: 'main_vertex',
     },
     fragment: {
         module,
-        entryPoint: 'fs',
+        entryPoint: 'main_fragment',
         targets: [{ format: canvasFormat }],
     },
 });
@@ -95,7 +101,7 @@ const uniformStaticBuffer = device.createBuffer({
     size: uniformStaticBufferSize,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
 });
-const uniformStaticValues = new Float32Array([-0.5, -0.5, -0.5, 0.0]);
+const uniformStaticValues = new Float32Array([-0.4, -0.4, -0.4, 0.0]);
 device.queue.writeBuffer(uniformStaticBuffer, 0, uniformStaticValues);
 
 
@@ -103,18 +109,21 @@ device.queue.writeBuffer(uniformStaticBuffer, 0, uniformStaticValues);
 // Triangles!
 const triangles = [];
 const triangleCount = 10;
-for (let i = 0; i < 10; ++i) {
+for (let i = 0; i < triangleCount; ++i) {
+    let r = 0.1 + i*0.1;
+    let g = 0.5 + i*0.1;
+    let b = 0.7 + i*0.1;
+
     triangles.push({
-        color:  [ 0.1 + i*0.1,  0.3 + i*0.1, 0.7 + i*0.1, 1.0 ],
-        scale:  [ 1.0 - i*0.09, 1.0 - i*0.09                  ],
-        offset: [ 0.0 + i*0.1,  0.0 + i*0.1                   ],
+        color:  [ r, g, b, 1.0 ],
+        scale:  [  1.0 - i*0.09 ,  1.0 - i*0.09 ],
+        offset: [ -0.3 + i*0.1  , -0.3 + i*0.1  ],
     });
 }
 
 
 
 // Triangle storage buffer.
-// (this really needs to be refactored! somehow)
 const triangleFloats = 4+2+2;
 const triangleBuffer = device.createBuffer({
     size: 4 * triangleFloats * triangleCount, // (4+2+2) * 4 bytes per triangle
