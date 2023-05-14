@@ -26,19 +26,26 @@ context.configure({
 
 
 // Shader.
+// (TODO: understand WGSL better)
 const wgsl = `
-struct UniformStruct {
+struct Triangle {
     color: vec4f,
     scale: vec2f,
     offset: vec2f,
 };
 
-@group(0) @binding(0) var<uniform> uniform_struct: UniformStruct;
-@group(0) @binding(1) var<uniform> uniform_color_offset: vec4f;
+struct VSOut {
+    @location(0) color: vec4f,
+    @builtin(position) position: vec4f,
+}
+
+@group(0) @binding(0) var<storage, read> triangles: array<Triangle>;
+@group(0) @binding(1) var<uniform> color_offset: vec4f;
 
 @vertex fn vs(
-    @builtin(vertex_index) index : u32
-) -> @builtin(position) vec4f {
+    @builtin(vertex_index) index: u32,
+    @builtin(instance_index) instance_index: u32
+) -> VSOut {
 
     var position = array<vec2f, 3>(
         vec2f( 0.0,  0.5),  // top center
@@ -46,11 +53,15 @@ struct UniformStruct {
         vec2f( 0.5, -0.5)   // bottom right
     );
 
-    return vec4f(position[index] * uniform_struct.scale + uniform_struct.offset, 0.0, 1.0);
+    let triangle = triangles[instance_index];
+    var out: VSOut;
+    out.color = triangle.color;
+    out.position = vec4f(position[index] * triangle.scale + triangle.offset, 0.0, 1.0);
+    return out;
 }
 
-@fragment fn fs(@builtin(position) input: vec4f) -> @location(0) vec4f {
-    return uniform_struct.color + uniform_color_offset;
+@fragment fn fs(input: VSOut) -> @location(0) vec4f {
+    return input.color + color_offset;
 }`;
 
 const module = device.createShaderModule({
@@ -79,7 +90,6 @@ const pipeline = device.createRenderPipeline({
 
 // "Static" shader-wide uniform buffer.
 // ...It's just a "color offset" vec4f -- see the shader code for reference.
-// (We don't make a bind group here for... reasons! Reasons mostly pertaining to the strange architecture of this script.)
 const uniformStaticBufferSize = 4*4; // vec4f = 4 bytes * 4 floats = 16 bytes
 const uniformStaticBuffer = device.createBuffer({
     size: uniformStaticBufferSize,
@@ -90,42 +100,43 @@ device.queue.writeBuffer(uniformStaticBuffer, 0, uniformStaticValues);
 
 
 
-// "Dynamic" triangle-specifc uniform buffers, and their bind groups.
-const objectCount = 10;
-
-const uniformBuffers = [];
-const bindGroups = [];
-
-for (let i = 0; i < objectCount; ++i) {
-
-    const uniformBufferSize = 4*4 + 2*4 + 2*4;
-
-    // The triangle-specific uniform buffer.
-    const buffer = device.createBuffer({
-        size: uniformBufferSize,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+// Triangles!
+const triangles = [];
+const triangleCount = 10;
+for (let i = 0; i < 10; ++i) {
+    triangles.push({
+        color:  [ 0.1 + i*0.1,  0.3 + i*0.1, 0.7 + i*0.1, 1.0 ],
+        scale:  [ 1.0 - i*0.09, 1.0 - i*0.09                  ],
+        offset: [ 0.0 + i*0.1,  0.0 + i*0.1                   ],
     });
-    uniformBuffers.push(buffer);
-
-    // The triangle-specific uniform buffer data.
-    const values = new Float32Array(uniformBufferSize / 4);
-    values.set([ 0.1+i*0.1  ,  0.30+i*0.1 , 0.7+i*0.1, 1 ], 0); // color
-    values.set([ 2.0-i*0.2  ,  2.00-i*0.2                ], 4); // scale
-    values.set([-0.5+i*0.08 , -0.25                      ], 6); // offset
-    device.queue.writeBuffer(buffer, 0, values);
-
-    // The triangle-specific bind group.
-    const bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-            { binding: 0, resource: { buffer: buffer }},
-            { binding: 1, resource: { buffer: uniformStaticBuffer }},
-            // ^^^ wow! we're reusing the same static buffer across every triangle. pretty cool
-        ],
-    });
-    bindGroups.push(bindGroup);
-
 }
+
+
+
+// Triangle storage buffer.
+// (this really needs to be refactored! somehow)
+const triangleFloats = 4+2+2;
+const triangleBuffer = device.createBuffer({
+    size: 4 * triangleFloats * triangleCount, // (4+2+2) * 4 bytes per triangle
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+
+const triangleData = new Float32Array((4+2+2) * triangleCount);
+for (let i = 0; i < triangleCount; ++i) {
+    triangleData.set(triangles[i].color,   0 + i*triangleFloats)
+    triangleData.set(triangles[i].scale,   4 + i*triangleFloats)
+    triangleData.set(triangles[i].offset,  6 + i*triangleFloats)
+}
+
+device.queue.writeBuffer(triangleBuffer, 0, triangleData);
+
+const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+        { binding: 0, resource: { buffer: triangleBuffer } },
+        { binding: 1, resource: { buffer: uniformStaticBuffer } },
+    ]
+});
 
 
 
@@ -145,10 +156,8 @@ const pass = encoder.beginRenderPass({
 });
 
 pass.setPipeline(pipeline);
-for (let i = 0; i < objectCount; ++i) {
-    pass.setBindGroup(0, bindGroups[i]);
-    pass.draw(3);  // call vertex shader 3 times
-}
+pass.setBindGroup(0, bindGroup);
+pass.draw(3, triangleCount);  // call vertex shader 3 times
 pass.end();
 
 
