@@ -1,5 +1,6 @@
-// this script (mostly) follows the tutorial from https://webgpufundamentals.org
 async function main() {
+
+
 
 // Adapter, device.
 const adapter = await navigator.gpu?.requestAdapter();
@@ -95,9 +96,9 @@ const triangleCount = 10;
 
 const initialTriangle = {
     color: [
-        [ -0.3, 0.3, 0.3 ],
-        [ -0.3, 0.6, 0.3 ],
-        [ -0.3, -0.1, 0.3 ],
+        [ -0.3,  0.3,  0.3 ],
+        [ -0.3,  0.6,  0.3 ],
+        [ -0.3, -0.1,  0.3 ],
     ],
     scale: [1.0, 1.0],
     offset: [-0.3, -0.3],
@@ -125,8 +126,8 @@ function triangleBuffer(triangle) {
     array.set(triangle.color[0], 0);
     array.set(triangle.color[1], 4);
     array.set(triangle.color[2], 8);
-    array.set(triangle.scale, 12);
-    array.set(triangle.offset, 14);
+    array.set(triangle.scale,   12);
+    array.set(triangle.offset,  14);
     device.queue.writeBuffer(buffer, 0, array);
 
     return buffer;
@@ -151,8 +152,7 @@ const encoder = device.createCommandEncoder({ label: 'encoder' });
 const pass = encoder.beginRenderPass({
     label: 'render pass',
     colorAttachments: [
-        {
-            // We're rendering to the canvas's current texture.
+        { // We're rendering to the canvas's current texture.
             view: context.getCurrentTexture().createView(),
             clearValue: [1.0, 1.0, 1.0, 1.0],
             loadOp: 'clear',
@@ -163,7 +163,7 @@ const pass = encoder.beginRenderPass({
 
 pass.setPipeline(pipeline);
 pass.setBindGroup(0, bindGroup);
-pass.draw(3, triangleCount);  // call vertex shader 3 times
+pass.draw(3, triangleCount);  // draw 3 vertices, with `triangleCount` different instances
 pass.end();
 
 

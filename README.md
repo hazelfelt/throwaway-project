@@ -6,7 +6,4 @@ if I push changes here long enough maybe i'll change that
 
 ---
 
-i'm currently following [webgpufundamentals.org's](https://webgpufundamentals.org) tutorial in `script.js`
-
-the `script-alain-edition.js` file is essentially stolen from [alain galvan's blog on Raw WebGPU](https://alain.xyz/blog/raw-webgpu),
-except the syntax is modified a decent bit
+i'm currently (loosely) following [webgpufundamentals.org's](https://webgpufundamentals.org) tutorial in `script.js`
