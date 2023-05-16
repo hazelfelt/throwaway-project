@@ -1,8 +1,5 @@
 // this script (mostly) follows the tutorial from https://webgpufundamentals.org
-
 async function main() {
-
-
 
 // Adapter, device.
 const adapter = await navigator.gpu?.requestAdapter();
@@ -26,50 +23,47 @@ context.configure({
 
 
 // Shader.
-// (i'm just having fun before i write things better)
 const wgsl = `
 struct Triangle {
-    color: vec4f,
+    color: array<vec3f, 3>,
     scale: vec2f,
     offset: vec2f,
 };
 
 struct Vertex {
-    @location(0) color: vec4f,
+    @location(0) color: vec3f,
     @builtin(position) position: vec4f,
 }
 
-@group(0) @binding(0) var<storage, read> triangles: array<Triangle>;
-@group(0) @binding(1) var<uniform> color_offset: vec4f;
+@group(0) @binding(0) var<uniform> initial: Triangle;
+@group(0) @binding(1) var<uniform> delta: Triangle;
 
 const corner = array<vec2f, 3>(
-    vec2f( 0.0,  0.5),  // top center
-    vec2f(-0.5, -0.5),  // bottom left
-    vec2f( 0.5, -0.5)   // bottom right
-);
-
-const color = array<vec3f, 3>(
-    vec3f( 0.0,  0.2, 0.0),  // top center
-    vec3f( 0.0,  0.5, 0.0),  // bottom left
-    vec3f( 0.0,  -0.2, 0.0)   // bottom right
+    vec2f( 0.0,  0.5),          // top center
+    vec2f(-0.5, -0.5),          // bottom left
+    vec2f( 0.5, -0.5)           // bottom right
 );
 
 @vertex fn main_vertex(
-    @builtin(vertex_index) index: u32,
-    @builtin(instance_index) instance_index: u32
+    @builtin(vertex_index) v: u32,
+    @builtin(instance_index) i: u32,
 ) -> Vertex {
 
-    let triangle = triangles[instance_index];
     var out: Vertex;
-    out.color = triangle.color + vec4f(color[index], 1.0);
-    out.position = vec4f(corner[index] * triangle.scale + triangle.offset, 0.0, 1.0);
+    out.color = initial.color[v] + f32(i)*delta.color[v];
+    out.position = vec4f(
+        corner[v]
+        * (initial.scale  + f32(i)*delta.scale)
+        + (initial.offset + f32(i)*delta.offset),
+        0.0, 1.0
+    );
     return out;
 }
 
 @fragment fn main_fragment(
-    @location(0) color: vec4f,
+    @location(0) color: vec3f,
 ) -> @location(0) vec4f {
-    return color + color_offset;
+    return vec4f(color, 1.0);
 }`;
 
 const module = device.createShaderModule({
@@ -96,58 +90,59 @@ const pipeline = device.createRenderPipeline({
 
 
 
-// "Static" shader-wide uniform buffer.
-// ...It's just a "color offset" vec4f -- see the shader code for reference.
-const uniformStaticBufferSize = 4*4; // vec4f = 4 bytes * 4 floats = 16 bytes
-const uniformStaticBuffer = device.createBuffer({
-    size: uniformStaticBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-});
-const uniformStaticValues = new Float32Array([-0.4, -0.4, -0.4, 0.0]);
-device.queue.writeBuffer(uniformStaticBuffer, 0, uniformStaticValues);
-
-
-
-// Triangles!
-const triangles = [];
+// Triangle data.
 const triangleCount = 10;
-for (let i = 0; i < triangleCount; ++i) {
-    let r = 0.1 + i*0.1;
-    let g = 0.5 + i*0.1;
-    let b = 0.7 + i*0.1;
 
-    triangles.push({
-        color:  [ r, g, b, 1.0 ],
-        scale:  [  1.0 - i*0.09 ,  1.0 - i*0.09 ],
-        offset: [ -0.3 + i*0.1  , -0.3 + i*0.1  ],
+const initialTriangle = {
+    color: [
+        [ -0.3, 0.3, 0.3 ],
+        [ -0.3, 0.6, 0.3 ],
+        [ -0.3, -0.1, 0.3 ],
+    ],
+    scale: [1.0, 1.0],
+    offset: [-0.3, -0.3],
+};
+
+const deltaTriangle = {
+    color: [
+        [ 0.1, 0.1, 0.1 ],
+        [ 0.1, 0.1, 0.1 ],
+        [ 0.1, 0.1, 0.1 ],
+    ],
+    scale: [-0.09, -0.09],
+    offset: [0.1, 0.1],
+};
+
+
+
+// Given triangle data, this helper function writes to a GPU buffer and returns it.
+function triangleBuffer(triangle) {
+    const buffer = device.createBuffer({
+        size: 4 * 16, // 16 floats per triangle (includes padding).
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+    const array = new Float32Array(16);
+    array.set(triangle.color[0], 0);
+    array.set(triangle.color[1], 4);
+    array.set(triangle.color[2], 8);
+    array.set(triangle.scale, 12);
+    array.set(triangle.offset, 14);
+    device.queue.writeBuffer(buffer, 0, array);
+
+    return buffer;
 }
 
 
 
-// Triangle storage buffer.
-const triangleFloats = 4+2+2;
-const triangleBuffer = device.createBuffer({
-    size: 4 * triangleFloats * triangleCount, // (4+2+2) * 4 bytes per triangle
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-const triangleData = new Float32Array((4+2+2) * triangleCount);
-for (let i = 0; i < triangleCount; ++i) {
-    triangleData.set(triangles[i].color,   0 + i*triangleFloats)
-    triangleData.set(triangles[i].scale,   4 + i*triangleFloats)
-    triangleData.set(triangles[i].offset,  6 + i*triangleFloats)
-}
-
-device.queue.writeBuffer(triangleBuffer, 0, triangleData);
-
+// Bind group for the initial + delta triangle uniform buffers.
 const bindGroup = device.createBindGroup({
+    label: "triangle bind group",
     layout: pipeline.getBindGroupLayout(0),
     entries: [
-        { binding: 0, resource: { buffer: triangleBuffer } },
-        { binding: 1, resource: { buffer: uniformStaticBuffer } },
+        { binding: 0, resource: { buffer: triangleBuffer(initialTriangle) } },
+        { binding: 1, resource: { buffer: triangleBuffer(deltaTriangle)   } },
     ]
-});
+})
 
 
 
