@@ -34,7 +34,7 @@ struct Triangle {
     offset: vec2f,
 };
 
-struct VSOut {
+struct Vertex {
     @location(0) color: vec4f,
     @builtin(position) position: vec4f,
 }
@@ -42,32 +42,34 @@ struct VSOut {
 @group(0) @binding(0) var<storage, read> triangles: array<Triangle>;
 @group(0) @binding(1) var<uniform> color_offset: vec4f;
 
+const corner = array<vec2f, 3>(
+    vec2f( 0.0,  0.5),  // top center
+    vec2f(-0.5, -0.5),  // bottom left
+    vec2f( 0.5, -0.5)   // bottom right
+);
+
+const color = array<vec3f, 3>(
+    vec3f( 0.0,  0.2, 0.0),  // top center
+    vec3f( 0.0,  0.5, 0.0),  // bottom left
+    vec3f( 0.0,  -0.2, 0.0)   // bottom right
+);
+
 @vertex fn main_vertex(
     @builtin(vertex_index) index: u32,
     @builtin(instance_index) instance_index: u32
-) -> VSOut {
-
-    var position = array<vec2f, 3>(
-        vec2f( 0.0,  0.5),  // top center
-        vec2f(-0.5, -0.5),  // bottom left
-        vec2f( 0.5, -0.5)   // bottom right
-    );
-
-    var color = array<vec3f, 3>(
-        vec3f( 0.0,  0.2, 0.0),  // top center
-        vec3f( 0.0,  0.5, 0.0),  // bottom left
-        vec3f( 0.0,  -0.2, 0.0)   // bottom right
-    );
+) -> Vertex {
 
     let triangle = triangles[instance_index];
-    var out: VSOut;
+    var out: Vertex;
     out.color = triangle.color + vec4f(color[index], 1.0);
-    out.position = vec4f(position[index] * triangle.scale + triangle.offset, 0.0, 1.0);
+    out.position = vec4f(corner[index] * triangle.scale + triangle.offset, 0.0, 1.0);
     return out;
 }
 
-@fragment fn main_fragment(input: VSOut) -> @location(0) vec4f {
-    return input.color + color_offset;
+@fragment fn main_fragment(
+    @location(0) color: vec4f,
+) -> @location(0) vec4f {
+    return color + color_offset;
 }`;
 
 const module = device.createShaderModule({
