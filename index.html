@@ -12,19 +12,31 @@
             margin: 0;      /* there's a tiny margin around the body by default, so remove it */
             background-color: black;
             display: flex;  /* lets us center the canvas vertically */
+            flex-direction: column;
             height: 100%;
         }
         canvas {
             background-color: whitesmoke;
             width: 600px;
             height: 400px;
-            margin: auto;   /* center horizontally and vertically */
+            margin: auto;
             display: block; /* ...to work with the body's `display: flex`, i guess? ill check later */
+        }
+        p {
+            font-family: monospace;
+            color: white;
+            user-select: none;
+
+            /* messy margin layout stuff (i'll make this nicer in the future) */
+            margin-top: 0;
+            margin-left: auto;
+            margin-right: auto;
         }
     </style>
 </head>
 
 <body>
     <canvas></canvas>
+    <p>0</p>
 </body>
 </html>

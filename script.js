@@ -34,8 +34,8 @@ async function main() {
         @builtin(position) position: vec4f,
     }
 
-    @group(0) @binding(0) var<uniform> initial: Triangle;
-    @group(0) @binding(1) var<uniform> delta: Triangle;
+    @group(0) @binding(0) var<uniform> frame: u32;
+    @group(0) @binding(1) var<uniform> triangle: Triangle;
 
     const corner = array<vec2f, 3>(
         vec2f( 0.0,  0.5),  // top center
@@ -48,15 +48,14 @@ async function main() {
         @builtin(instance_index) i: u32,
     ) -> Vertex {
 
-        let color = initial.color[v] + f32(i)*delta.color[v];
-        let position = vec4f(
-            corner[v]
-            * (initial.scale  + f32(i)*delta.scale)
-            + (initial.offset + f32(i)*delta.offset),
-            0.0, 1.0
+        let position = corner[v] * triangle.scale + triangle.offset;
+
+        let position_shaken = vec2(
+            position.x + fract(sin(f32(frame))*100000.0) * 0.015,
+            position.y + fract(sin(f32(frame + 100))*100000.0) * 0.015
         );
 
-        return Vertex(color, position);
+        return Vertex(triangle.color[v], vec4(position_shaken, 0.0, 1.0));
     }
 
     @fragment fn main_fragment(
@@ -90,9 +89,7 @@ async function main() {
 
 
     // Triangle data.
-    const triangleCount = 10;
-
-    const initialTriangle = {
+    const triangle = {
         color: [
             [ -0.3,  0.3,  0.3 ],
             [ -0.3,  0.6,  0.3 ],
@@ -102,47 +99,42 @@ async function main() {
         offset: [-0.3, -0.3],
     };
 
-    const deltaTriangle = {
-        color: [
-            [ 0.1, 0.1, 0.1 ],
-            [ 0.1, 0.1, 0.1 ],
-            [ 0.1, 0.1, 0.1 ],
-        ],
-        scale: [-0.09, -0.09],
-        offset: [0.1, 0.1],
-    };
 
 
-
-    // Given triangle data, this helper function writes to a GPU buffer and returns it.
-    function triangleBuffer(triangle) {
-        const buffer = device.createBuffer({
-            size: 4 * 16, // 16 floats per triangle (includes padding).
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
+    // Triangle buffer.
+    const triangleBuffer = device.createBuffer({
+        label: "triangle buffer",
+        size: 4 * 16, // 16 floats in a triangle (includes padding).
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    {
         const array = new Float32Array(16);
         array.set(triangle.color[0], 0);
         array.set(triangle.color[1], 4);
         array.set(triangle.color[2], 8);
         array.set(triangle.scale,   12);
         array.set(triangle.offset,  14);
-        device.queue.writeBuffer(buffer, 0, array);
-
-        return buffer;
+        device.queue.writeBuffer(triangleBuffer, 0, array);
     }
 
-    const initialBuffer = triangleBuffer(initialTriangle);
-    const deltaBuffer = triangleBuffer(deltaTriangle);
+    // Frame number buffer.
+    const frameBuffer = device.createBuffer({
+        label: "frame buffer",
+        size: 4, // one single u32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([1]));
 
-    // Bind group for the initial + delta triangle uniform buffers.
+    // Bind group.
     const bindGroup = device.createBindGroup({
-        label: "triangle bind group",
+        label: "bind group",
         layout: pipeline.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: { buffer: initialBuffer } },
-            { binding: 1, resource: { buffer: deltaBuffer   } },
-        ]
+            { binding: 0, resource: { buffer: frameBuffer } },
+            { binding: 1, resource: { buffer: triangleBuffer } },
+        ],
     })
+
 
 
     // Render.
@@ -164,7 +156,7 @@ async function main() {
 
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
-        pass.draw(3, triangleCount);  // draw 3 vertices, with `triangleCount` different instances
+        pass.draw(3);  // draw 3 vertices
         pass.end();
 
         // We're done. Form a command buffer from `encoder`, and submit it.
@@ -176,12 +168,22 @@ async function main() {
 
 
     // Whenever the canvas is clicked.
-    document.querySelector("canvas").onmousedown = function () {
+    const counterElement = document.querySelector("p");
+    let counter = 0;
+    canvas.onmousedown = function () {
         console.log("this should do something...");
-        render();
     }
+
+    function loop() {
+        counterElement.innerText = ++counter;
+        device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([counter])); // NOTE: probably REALLY inefficient!
+        render();
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
 }
 
-main().catch(err => {
-    console.error(err);
-});
+// Prevent Edge's context menu.
+window.onmouseup = event => event.preventDefault();
+
+main().catch(err => console.error(err));
