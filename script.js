@@ -40,9 +40,9 @@ struct Vertex {
 @group(0) @binding(1) var<uniform> delta: Triangle;
 
 const corner = array<vec2f, 3>(
-    vec2f( 0.0,  0.5),          // top center
-    vec2f(-0.5, -0.5),          // bottom left
-    vec2f( 0.5, -0.5)           // bottom right
+    vec2f( 0.0,  0.5),  // top center
+    vec2f(-0.5, -0.5),  // bottom left
+    vec2f( 0.5, -0.5)   // bottom right
 );
 
 @vertex fn main_vertex(
@@ -50,15 +50,15 @@ const corner = array<vec2f, 3>(
     @builtin(instance_index) i: u32,
 ) -> Vertex {
 
-    var out: Vertex;
-    out.color = initial.color[v] + f32(i)*delta.color[v];
-    out.position = vec4f(
+    let color = initial.color[v] + f32(i)*delta.color[v];
+    let position = vec4f(
         corner[v]
         * (initial.scale  + f32(i)*delta.scale)
         + (initial.offset + f32(i)*delta.offset),
         0.0, 1.0
     );
-    return out;
+
+    return Vertex(color, position);
 }
 
 @fragment fn main_fragment(
