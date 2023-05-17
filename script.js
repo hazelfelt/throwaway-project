@@ -36,6 +36,7 @@ async function main() {
 
     @group(0) @binding(0) var<uniform> frame: u32;
     @group(0) @binding(1) var<uniform> triangle: Triangle;
+    @group(0) @binding(2) var<uniform> wobble_intensity: f32;
 
     const corner = array<vec2f, 3>(
         vec2f( 0.0,  0.5),  // top center
@@ -48,14 +49,14 @@ async function main() {
         @builtin(instance_index) i: u32,
     ) -> Vertex {
 
-        let position = corner[v] * triangle.scale + triangle.offset;
+        let canvas_position = corner[v] * triangle.scale + triangle.offset;
 
-        let position_shaken = vec2(
-            position.x + fract(sin(f32(frame))*100000.0) * 0.015,
-            position.y + fract(sin(f32(frame + 100))*100000.0) * 0.015
+        let wobble_position = canvas_position + vec2(
+            sin(f32(frame) / 3.0) * wobble_intensity,
+            -cos(f32(frame) / 3.0) * wobble_intensity,
         );
 
-        return Vertex(triangle.color[v], vec4(position_shaken, 0.0, 1.0));
+        return Vertex(triangle.color[v], vec4(wobble_position, 0.0, 1.0));
     }
 
     @fragment fn main_fragment(
@@ -123,7 +124,15 @@ async function main() {
         size: 4, // one single u32,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([1]));
+    device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([0]));
+
+    // Wobble intensity buffer.
+    const wobbleIntensityBuffer = device.createBuffer({
+        label: "wobble intensity buffer",
+        size: 4, // one single f32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(wobbleIntensityBuffer, 0, new Float32Array([0.0]));
 
     // Bind group.
     const bindGroup = device.createBindGroup({
@@ -132,6 +141,7 @@ async function main() {
         entries: [
             { binding: 0, resource: { buffer: frameBuffer } },
             { binding: 1, resource: { buffer: triangleBuffer } },
+            { binding: 2, resource: { buffer: wobbleIntensityBuffer } },
         ],
     })
 
@@ -170,15 +180,19 @@ async function main() {
     // Whenever the canvas is clicked.
     const counterElement = document.querySelector("p");
     let counter = 0;
-    canvas.onmousedown = function () {
-        console.log("this should do something...");
-    }
+    let wobbleIntensity = 0.0;
+    canvas.onmousedown = () => wobbleIntensity = wobbleIntensity * 2 + 0.15;
 
     function loop() {
-        counterElement.innerText = ++counter;
-        device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([counter])); // NOTE: probably REALLY inefficient!
+        // NOTE: i'm guessing it's really inefficient to make a new array every frame
+        // i'll fix this whenever i refactor things later
+        device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([counter]));
+        device.queue.writeBuffer(wobbleIntensityBuffer, 0, new Float32Array([wobbleIntensity]));
         render();
         requestAnimationFrame(loop);
+
+        counterElement.innerText = ++counter;
+        wobbleIntensity /= 1.1;
     }
     requestAnimationFrame(loop);
 }
