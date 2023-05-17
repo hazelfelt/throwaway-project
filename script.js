@@ -35,8 +35,9 @@ async function main() {
     }
 
     @group(0) @binding(0) var<uniform> frame: u32;
-    @group(0) @binding(1) var<uniform> triangle: Triangle;
-    @group(0) @binding(2) var<uniform> wobble_intensity: f32;
+    @group(0) @binding(1) var<uniform> initial: Triangle;
+    @group(0) @binding(2) var<uniform> delta: Triangle;
+    @group(0) @binding(3) var<uniform> wobble_intensity: f32;
 
     const corner = array<vec2f, 3>(
         vec2f( 0.0,  0.5),  // top center
@@ -49,14 +50,35 @@ async function main() {
         @builtin(instance_index) i: u32,
     ) -> Vertex {
 
-        let canvas_position = corner[v] * triangle.scale + triangle.offset;
+        let triangle = instance_triangle(i);
 
+        let canvas_position = corner[v] * triangle.scale + triangle.offset;
         let wobble_position = canvas_position + vec2(
-            sin(f32(frame) / 3.0) * wobble_intensity,
-            -cos(f32(frame) / 3.0) * wobble_intensity,
+             sin(f32(frame+i*4) / 3.0) * wobble_intensity,
+            -cos(f32(frame+i*4) / 3.0) * wobble_intensity,
         );
 
         return Vertex(triangle.color[v], vec4(wobble_position, 0.0, 1.0));
+    }
+
+    // Returns the triangle specific to this instance.
+    fn instance_triangle(i: u32) -> Triangle {
+
+        // NOTE: this part here is a little redundant, because each time
+        // it's called, it calculates 3 vertices worth of color...
+        // yet it's called once every vertex!
+        //
+        // i wonder what a better way to do this would be...
+        let color = array<vec3f, 3>(
+            initial.color[0] + f32(i)*delta.color[0],
+            initial.color[1] + f32(i)*delta.color[1],
+            initial.color[2] + f32(i)*delta.color[2],
+        );
+
+        let scale  = initial.scale  + f32(i)*delta.scale;
+        let offset = initial.offset + f32(i)*delta.offset;
+
+        return Triangle(color, scale, offset);
     }
 
     @fragment fn main_fragment(
@@ -89,8 +111,11 @@ async function main() {
 
 
 
+
     // Triangle data.
-    const triangle = {
+    const triangleCount = 10;
+
+    const initialTriangle = {
         color: [
             [ -0.3,  0.3,  0.3 ],
             [ -0.3,  0.6,  0.3 ],
@@ -100,23 +125,39 @@ async function main() {
         offset: [-0.3, -0.3],
     };
 
+    const deltaTriangle = {
+        color: [
+            [ 0.1, 0.1, 0.1 ],
+            [ 0.1, 0.1, 0.1 ],
+            [ 0.1, 0.1, 0.1 ],
+        ],
+        scale: [-0.09, -0.09],
+        offset: [0.1, 0.1],
+    };
 
 
-    // Triangle buffer.
-    const triangleBuffer = device.createBuffer({
-        label: "triangle buffer",
-        size: 4 * 16, // 16 floats in a triangle (includes padding).
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    {
+
+    // Given triangle data, this function writes to a GPU buffer and returns it.
+    function triangleBuffer(triangle, label) {
+        const buffer = device.createBuffer({
+            label,
+            size: 4 * 16, // 16 floats per triangle (includes padding).
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
         const array = new Float32Array(16);
         array.set(triangle.color[0], 0);
         array.set(triangle.color[1], 4);
         array.set(triangle.color[2], 8);
         array.set(triangle.scale,   12);
         array.set(triangle.offset,  14);
-        device.queue.writeBuffer(triangleBuffer, 0, array);
+        device.queue.writeBuffer(buffer, 0, array);
+
+        return buffer;
     }
+
+    // Triangle buffers
+    const initialBuffer = triangleBuffer(initialTriangle, "initial triangle buffer");
+    const deltaBuffer = triangleBuffer(deltaTriangle, "delta triangle buffer");
 
     // Frame number buffer.
     const frameBuffer = device.createBuffer({
@@ -134,14 +175,17 @@ async function main() {
     });
     device.queue.writeBuffer(wobbleIntensityBuffer, 0, new Float32Array([0.0]));
 
+
+
     // Bind group.
     const bindGroup = device.createBindGroup({
         label: "bind group",
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: frameBuffer } },
-            { binding: 1, resource: { buffer: triangleBuffer } },
-            { binding: 2, resource: { buffer: wobbleIntensityBuffer } },
+            { binding: 1, resource: { buffer: initialBuffer } },
+            { binding: 2, resource: { buffer: deltaBuffer } },
+            { binding: 3, resource: { buffer: wobbleIntensityBuffer } },
         ],
     })
 
@@ -166,7 +210,7 @@ async function main() {
 
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
-        pass.draw(3);  // draw 3 vertices
+        pass.draw(3, triangleCount);  // draw 3 vertices for each triangle
         pass.end();
 
         // We're done. Form a command buffer from `encoder`, and submit it.
@@ -177,13 +221,14 @@ async function main() {
 
 
 
-    // Whenever the canvas is clicked.
+    // (descriptive comment pending)
     const counterElement = document.querySelector("p");
     let counter = 0;
     let wobbleIntensity = 0.0;
     canvas.onmousedown = () => wobbleIntensity = wobbleIntensity * 2 + 0.15;
 
     function loop() {
+
         // NOTE: i'm guessing it's really inefficient to make a new array every frame
         // i'll fix this whenever i refactor things later
         device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([counter]));
@@ -192,7 +237,7 @@ async function main() {
         requestAnimationFrame(loop);
 
         counterElement.innerText = ++counter;
-        wobbleIntensity /= 1.1;
+        wobbleIntensity /= 1.05;
     }
     requestAnimationFrame(loop);
 }

@@ -6,4 +6,4 @@ if I push changes here long enough maybe i'll change that
 
 ---
 
-i'm currently (loosely) following [webgpufundamentals.org's](https://webgpufundamentals.org) tutorial in `script.js`
+i'm currently (very loosely) following [webgpufundamentals.org's](https://webgpufundamentals.org) tutorial in `script.js`
