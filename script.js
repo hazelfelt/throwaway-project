@@ -35,14 +35,15 @@ async function main() {
     }
 
     @group(0) @binding(0) var<uniform> frame: u32;
-    @group(0) @binding(1) var<uniform> initial: Triangle;
-    @group(0) @binding(2) var<uniform> delta: Triangle;
-    @group(0) @binding(3) var<uniform> wobble_intensity: f32;
+    @group(0) @binding(1) var<uniform> canvas: vec2f;
+    @group(0) @binding(2) var<uniform> initial: Triangle;
+    @group(0) @binding(3) var<uniform> delta: Triangle;
+    @group(0) @binding(4) var<uniform> wobble_intensity: f32;
 
     const corner = array<vec2f, 3>(
-        vec2f( 0.0,  0.5),  // top center
-        vec2f(-0.5, -0.5),  // bottom left
-        vec2f( 0.5, -0.5)   // bottom right
+        vec2f( 0.0,  0.43301270189 ),  // top center
+        vec2f(-0.5, -0.43301270189 ),  // bottom left
+        vec2f( 0.5, -0.43301270189 )   // bottom right
     );
 
     @vertex fn main_vertex(
@@ -53,12 +54,14 @@ async function main() {
         let triangle = instance_triangle(i);
 
         let canvas_position = corner[v] * triangle.scale + triangle.offset;
-        let wobble_position = canvas_position + vec2(
-             sin(f32(frame+i*4) / 3.0) * wobble_intensity,
-            -cos(f32(frame+i*4) / 3.0) * wobble_intensity,
-        );
+        let wobble_position =
+            canvas_position
+            + vec2(sin(f32(frame+i*4) / 3.0), -cos(f32(frame+i*4) / 3.0))
+            * wobble_intensity;
 
-        return Vertex(triangle.color[v], vec4(wobble_position, 0.0, 1.0));
+        let clip_position = wobble_position / canvas * 2;
+
+        return Vertex(triangle.color[v], vec4(clip_position, 0.0, 1.0));
     }
 
     // Returns the triangle specific to this instance.
@@ -121,8 +124,8 @@ async function main() {
             [ -0.3,  0.6,  0.3 ],
             [ -0.3, -0.1,  0.3 ],
         ],
-        scale: [1.0, 1.0],
-        offset: [-0.3, -0.3],
+        scale: [300.0, 300.0],
+        offset: [-110, -30],
     };
 
     const deltaTriangle = {
@@ -131,8 +134,8 @@ async function main() {
             [ 0.1, 0.1, 0.1 ],
             [ 0.1, 0.1, 0.1 ],
         ],
-        scale: [-0.09, -0.09],
-        offset: [0.1, 0.1],
+        scale: [-30, -30],
+        offset: [40, 20],
     };
 
 
@@ -167,6 +170,14 @@ async function main() {
     });
     device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([0]));
 
+    // Canvas dimensions buffer.
+    const canvasBuffer = device.createBuffer({
+        label: "canvas dimensions buffer",
+        size: 8, // two f32s.
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(canvasBuffer, 0, new Float32Array([canvas.clientWidth, canvas.clientHeight]));
+
     // Wobble intensity buffer.
     const wobbleIntensityBuffer = device.createBuffer({
         label: "wobble intensity buffer",
@@ -183,9 +194,10 @@ async function main() {
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: frameBuffer } },
-            { binding: 1, resource: { buffer: initialBuffer } },
-            { binding: 2, resource: { buffer: deltaBuffer } },
-            { binding: 3, resource: { buffer: wobbleIntensityBuffer } },
+            { binding: 1, resource: { buffer: canvasBuffer } },
+            { binding: 2, resource: { buffer: initialBuffer } },
+            { binding: 3, resource: { buffer: deltaBuffer } },
+            { binding: 4, resource: { buffer: wobbleIntensityBuffer } },
         ],
     })
 
@@ -225,7 +237,7 @@ async function main() {
     const counterElement = document.querySelector("p");
     let counter = 0;
     let wobbleIntensity = 0.0;
-    canvas.onmousedown = () => wobbleIntensity = wobbleIntensity * 2 + 0.15;
+    canvas.onmousedown = () => wobbleIntensity = wobbleIntensity * 2 + 45;
 
     function loop() {
 
@@ -243,6 +255,7 @@ async function main() {
 }
 
 // Prevent Edge's context menu.
-window.onmouseup = event => event.preventDefault();
+window.onmouseup     = event => event.preventDefault();
+window.oncontextmenu = event => event.preventDefault();
 
 main().catch(err => console.error(err));
