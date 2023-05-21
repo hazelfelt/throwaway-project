@@ -9,8 +9,9 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    canvas.width  = canvas.clientWidth / 8;
-    canvas.height = canvas.clientHeight / 8;
+    const zoom = 4;
+    canvas.width  = canvas.clientWidth / zoom;
+    canvas.height = canvas.clientHeight / zoom;
 
     const context = canvas.getContext('webgpu');
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -30,31 +31,59 @@ async function main() {
     @group(0) @binding(0) var atlas: texture_2d<f32>;
     @group(0) @binding(1) var atlas_sampler: sampler;
     @group(0) @binding(2) var<uniform> atlas_size: vec2u;
-    // @group(0) @binding(3) var<storage, read> chunk: array<array<u32, 16>, 16>;
-    @group(0) @binding(3) var<uniform> chunk: u32;
+    @group(0) @binding(3) var<storage, read> chunk: array<array<u32, 16>, 16>;
 
     @fragment fn main_fragment(
         @builtin(position) pos: vec4f
     ) -> @location(0) vec4f {
 
-        // // The texture ID we will be sampling.
-        // let id = chunk[u32(pos.x)/8u][u32(pos.y)/8u];
+        // The texture ID we will be sampling.
+        let id = chunk[u32(pos.y)/8u][u32(pos.x)/8u];
 
-        // // The square on the atlas of which this texture is located.
-        // let atlas_pos = vec2u(
-        //     id % atlas_size.x,
-        //     id / atlas_size.y
-        // );
-        let atlas_pos = vec2u(1u, 0u);
+        // The square on the atlas of which this texture is located.
+        let atlas_pos = vec2u(
+            id % atlas_size.x,
+            id / atlas_size.x
+        );
 
         // UV coordinates on the atlas.
         let uv = (vec2f(atlas_pos) + fract(pos.xy/8.0)) / vec2f(atlas_size);
+
+        // Sampler.
         return textureSample(atlas, atlas_sampler, uv);
     }`;
 
     const module = device.createShaderModule({
         label: "chunk shader",
         code: wgsl,
+    });
+
+
+
+    // Pipeline.
+    const pipeline = device.createRenderPipeline({
+        label: "chunk rendering pipeline",
+        layout: 'auto',
+        primitive: {
+            topology: "triangle-strip"
+        },
+        vertex: {
+            module,
+            entryPoint: 'main_vertex',
+            buffers: [{
+                arrayStride: 2*4,
+                attributes: [{
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: 'float32x2'
+                }]
+            }],
+        },
+        fragment: {
+            module,
+            entryPoint: 'main_fragment',
+            targets: [{ format: canvasFormat }],
+        },
     });
 
 
@@ -116,49 +145,18 @@ async function main() {
     // Chunk buffer.
     const chunkBuffer = device.createBuffer({
         label: "chunk storage buffer",
-        size: 4, // 16x16 grid of u32s
+        size: 16*16*4, // 16x16 grid of u32s
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
-    // const chunkArray = new Uint32Array(16*16);
-    // for (let y = 0; y < 16; ++y) {
-    //     for (let x = 0; x < 16; ++x) {
-    //         chunkArray.set(2, y*16 + x);
-    //     }
-    // }
-
-    const chunkArray = new Uint32Array(1);
-    chunkArray.set(1, 0);
+    const chunkArray = new Uint32Array(16*16);
+    for (let y = 0; y < 16; ++y) {
+        for (let x = 0; x < 16; ++x) {
+            chunkArray.set([(y+x/2)%4], y*16 + x);
+        }
+    }
 
     device.queue.writeBuffer(chunkBuffer, 0, chunkArray);
-
-
-
-    // Pipeline.
-    const pipeline = device.createRenderPipeline({
-        label: "chunk rendering pipeline",
-        layout: 'auto',
-        primitive: {
-            topology: "triangle-strip"
-        },
-        vertex: {
-            module,
-            entryPoint: 'main_vertex',
-            buffers: [{
-                arrayStride: 2*4,
-                attributes: [{
-                    shaderLocation: 0,
-                    offset: 0,
-                    format: 'float32x2'
-                }]
-            }],
-        },
-        fragment: {
-            module,
-            entryPoint: 'main_fragment',
-            targets: [{ format: canvasFormat }],
-        },
-    });
 
 
 
@@ -199,6 +197,8 @@ async function main() {
     // We're done. Form a command buffer from `encoder`, and submit it.
     device.queue.submit([encoder.finish()]);
 }
+
+
 
 // Prevent Edge's context menu.
 window.onmouseup = event => event.preventDefault();
