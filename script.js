@@ -9,8 +9,9 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+    const zoom = 8;
+    canvas.width  = canvas.clientWidth  / zoom;
+    canvas.height = canvas.clientHeight / zoom;
 
     const context = canvas.getContext('webgpu');
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
