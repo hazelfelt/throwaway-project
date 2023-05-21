@@ -14,6 +14,7 @@
             display: flex;  /* lets us center the canvas vertically */
             flex-direction: column;
             height: 100%;
+            image-rendering: pixelated;
         }
         canvas {
             background-color: whitesmoke;
@@ -21,7 +22,6 @@
             height: 400px;
             margin: auto;
             display: block; /* ...to work with the body's `display: flex`, i guess? ill check later */
-            /* pointer-events: ; */
         }
         p {
             font-family: monospace;
@@ -37,6 +37,7 @@
 </head>
 
 <body>
+    <img src="atlas.png" style="display: none;">
     <canvas></canvas>
     <p>0</p>
 </body>
