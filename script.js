@@ -24,13 +24,6 @@ async function main() {
 
     // Shader.
     const wgsl = `
-
-    const corner = array<vec2f, 3>(
-        vec2f( 0.0,  0.5),  // top center
-        vec2f(-0.5, -0.5),  // bottom left
-        vec2f( 0.5, -0.5)   // bottom right
-    );
-
     @group(0) @binding(0) var<uniform> canvas: vec2f;
 
     @vertex fn main_vertex(@location(0) pos: vec2f) -> @builtin(position) vec4f {
@@ -84,7 +77,7 @@ async function main() {
     });
     device.queue.writeBuffer(
         canvasBuffer, 0,
-        new Float32Array([canvas.clientWidth, canvas.clientHeight])
+        new Float32Array([canvas.width, canvas.height])
     );
 
     // Bind group.
@@ -100,13 +93,6 @@ async function main() {
         size: 2*2*4,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(
-        vertexBuffer, 0,
-        new Float32Array([
-            -1, 0,
-            1, 1
-        ])
-    );
 
 
 
@@ -144,17 +130,20 @@ async function main() {
     let cornerB = [0, 0];
     let frame = 0;
 
+    // Update.
+    function update() {
+        cornerA[0] = 7 * Math.sin( frame/Math.PI/16);
+        cornerA[1] = 7 * Math.cos( frame/Math.PI/16);
+        cornerB[0] = 7 * Math.sin(-frame/Math.PI/32)*1.01;
+        cornerB[1] = 7 * Math.cos(-frame/Math.PI/32)*1.01;
+        device.queue.writeBuffer(vertexBuffer, 0, new Float32Array(cornerA.concat(cornerB)));
+        ++frame;
+    }
+
     // Loop.
     function loop() {
+        update();
         render();
-
-        // Stateful things.
-        ++frame;
-        cornerA[0] = 150 * Math.sin( frame/Math.PI/16);
-        cornerA[1] = 150 * Math.cos( frame/Math.PI/16);
-        cornerB[0] = 150 * Math.sin(-frame/Math.PI/32)*1.1;
-        cornerB[1] = 150 * Math.cos(-frame/Math.PI/32)*1.1;
-        device.queue.writeBuffer(vertexBuffer, 0, new Float32Array(cornerA.concat(cornerB)));
 
         // Wait for next frame.
         requestAnimationFrame(loop);
