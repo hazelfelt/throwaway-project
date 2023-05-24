@@ -1,13 +1,9 @@
 async function main() {
 
-    // Adapter, device.
     const adapter = await navigator.gpu?.requestAdapter();
     const device = await adapter?.requestDevice();
     if (!device) throw new Error('need a browser that supports WebGPU');
 
-
-
-    // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
     const zoom = 16;
     canvas.width  = canvas.clientWidth  / zoom;
@@ -22,8 +18,7 @@ async function main() {
 
 
 
-    // Shader.
-    const wgsl = `
+    const lineWgsl = `
     @group(0) @binding(0) var<uniform> canvas: vec2f;
 
     @vertex fn main_vertex(@location(0) pos: vec2f) -> @builtin(position) vec4f {
@@ -32,7 +27,8 @@ async function main() {
 
     @fragment fn main_fragment() -> @location(0) vec4f {
         return vec4f(0.0, 0.0, 0.0, 1.0);
-    }`;
+    }
+    `;
 
     const module = device.createShaderModule({
         label: "it's a shader!",
@@ -41,7 +37,22 @@ async function main() {
 
 
 
-    // Pipeline.
+    const blurWgsl = `
+    @group(0) @binding(0) var frame: texture_2d;
+    @group(0) @binding(1) var frame_sampler: sampler;
+
+    @fragment fn main() -> @location(0) vec4f {
+        return vec4f(0.5, 0.5, 0.0, 1.0);
+    }
+    `;
+
+    const blurModule = device.createShaderModule({
+        label: "blur shader",
+        code: blurWgsl,
+    });
+
+
+
     const pipeline = device.createRenderPipeline({
         label: "it's a pipeline!",
         layout: 'auto',
@@ -80,14 +91,14 @@ async function main() {
         new Float32Array([canvas.width, canvas.height])
     );
 
-    // Bind group.
+
+
     const bindGroup = device.createBindGroup({
         label: "bind group",
         layout: pipeline.getBindGroupLayout(0),
         entries: [{binding: 0, resource: {buffer: canvasBuffer}}]
     });
 
-    // Vertex buffer.
     const vertexBuffer = device.createBuffer({
         label: "vertex buffer",
         size: 2*2*4,
@@ -96,10 +107,8 @@ async function main() {
 
 
 
-    // Rendering.
     function render() {
 
-        // Command encoder, render pass.
         const encoder = device.createCommandEncoder({ label: 'encoder' });
         const pass = encoder.beginRenderPass({
             label: 'render pass',
@@ -119,7 +128,6 @@ async function main() {
         pass.draw(2);
         pass.end();
 
-        // We're done. Form a command buffer from `encoder`, and submit it.
         device.queue.submit([encoder.finish()]);
     }
 
@@ -130,7 +138,6 @@ async function main() {
     let cornerB = [0, 0];
     let frame = 0;
 
-    // Update.
     function update() {
         cornerA[0] = 7 * Math.sin( frame/Math.PI/16);
         cornerA[1] = 7 * Math.cos( frame/Math.PI/16);
@@ -140,12 +147,9 @@ async function main() {
         ++frame;
     }
 
-    // Loop.
     function loop() {
         update();
         render();
-
-        // Wait for next frame.
         requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
