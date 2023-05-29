@@ -26,7 +26,7 @@ async function main() {
     }
 
     @fragment fn main_fragment() -> @location(0) vec4f {
-        return vec4f(0.0, 0.0, 0.0, 1.0);
+        return vec4f(1.0, 1.0, 1.0, 1.0);
     }
     `;
 
@@ -94,8 +94,7 @@ async function main() {
     @group(0) @binding(2) var frame_sampler: sampler;
 
     @fragment fn main_fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-        return textureSample(frame, frame_sampler, pos.xy/canvas) + vec4f(0.1, 0.5, 0.1, 0.0);
-        // return vec4f(0.5, 0.5, 0.5, 1.0);
+        return textureSample(frame, frame_sampler, pos.xy/canvas);
     }
     `;
 
@@ -170,7 +169,7 @@ async function main() {
         label: 'render pass',
         colorAttachments: [{
             view: null, // to be set during rendering
-            clearValue: [1.0, 1.0, 1.0, 1.0],
+            clearValue: [0.0, 0.0, 0.0, 0.0],
             loadOp: 'clear',
             storeOp: 'store',
         }],
