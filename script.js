@@ -1,3 +1,9 @@
+async function fetchText(url) {
+    const response = await fetch(url);
+    const text = await response.text();
+    return text;
+}
+
 async function main() {
 
     const adapter = await navigator.gpu?.requestAdapter();
@@ -17,186 +23,242 @@ async function main() {
     });
 
 
-    // Line shader.
-    const lineWgsl = `
-    @group(0) @binding(0) var<uniform> canvas: vec2f;
 
-    @vertex fn main_vertex(@location(0) pos: vec2f) -> @builtin(position) vec4f {
-        return vec4f(pos*2.0/canvas, 0.0, 1.0);
-    }
+    // General shader stuff.
+    const lineShader = device.createShaderModule({ label: "line shader", code: await fetchText('line.wgsl') });
+    const trailShader = device.createShaderModule({ label: "trail shader", code: await fetchText('trail.wgsl') });
+    const finalShader = device.createShaderModule({ label: "final shader", code: await fetchText('final.wgsl') });
 
-    @fragment fn main_fragment() -> @location(0) vec4f {
-        return vec4f(1.0, 1.0, 1.0, 1.0);
-    }
-    `;
-
-    const lineModule = device.createShaderModule({
-        label: "line shader",
-        code: lineWgsl,
+    const canvasVertexBuffer = device.createBuffer({
+        label: "canvas vertex buffer",
+        size: 4*2*4, // vec2f
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
+    device.queue.writeBuffer(
+        canvasVertexBuffer, 0,
+        new Float32Array([
+            -1, 1,
+            -1, -1,
+            1, 1,
+            1, -1,
+        ]),
+    );
 
-    const linePipeline = device.createRenderPipeline({
-        label: "line pipeline",
-        layout: 'auto',
-        primitive: {
-            topology: "line-list",
-        },
-        vertex: {
-            module: lineModule,
-            entryPoint: 'main_vertex',
-            buffers: [{
-                arrayStride: 2*4,
-                attributes: [{
-                    shaderLocation: 0,
-                    offset: 0,
-                    format: "float32x2",
-                }]
-            }]
-        },
-        fragment: {
-            module: lineModule,
-            entryPoint: 'main_fragment',
-            targets: [{ format: canvasFormat }],
-        },
-    });
-
-    const canvasSizeBuffer = device.createBuffer({
-        label: "canvas size buffer",
-        size: 2*2*4,
+    const resolutionUniform = device.createBuffer({
+        label: "resolution uniform",
+        size: 2*4, // vec2f
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(canvasSizeBuffer, 0, new Float32Array([canvas.width, canvas.height]));
+    device.queue.writeBuffer(resolutionUniform, 0, new Float32Array([canvas.width, canvas.height]));
 
-    const lineBindGroup = device.createBindGroup({
-        label: "bind group",
-        layout: linePipeline.getBindGroupLayout(0),
-        entries: [
-            {binding: 0, resource: {buffer: canvasSizeBuffer}},
-        ]
-    });
-
-    const lineBuffer = device.createBuffer({
-        label: "vertex buffer",
-        size: 2*2*4,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    });
+    const sampler = device.createSampler({ label: "sampler" })
 
 
 
-    // Multiply shader.
-    const multiplyWgsl = `
-    @vertex fn main_vertex(@location(0) position: vec2f) -> @builtin(position) vec4f {
-        return vec4f(position, 0.0, 1.0);
-    }
-
-    @group(0) @binding(0) var<uniform> canvas: vec2f;
-    @group(0) @binding(1) var frame: texture_2d<f32>;
-    @group(0) @binding(2) var frame_sampler: sampler;
-
-    @fragment fn main_fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-        return textureSample(frame, frame_sampler, pos.xy/canvas);
-    }
-    `;
-
-    const multiplyModule = device.createShaderModule({
-        label: "multiply shader",
-        code: multiplyWgsl,
-    });
-
-    const multiplyPipeline = device.createRenderPipeline({
-        layout: "auto",
-        primitive: {
-            topology: "triangle-strip",
-        },
+    // Line shader stuff.
+    const linePipeline = device.createRenderPipeline({
+        label: "line render pipeline",
+        layout: 'auto',
+        primitive: { topology: 'line-list' },
         vertex: {
+            module: lineShader,
             entryPoint: "main_vertex",
-            module: multiplyModule,
             buffers: [{
                 arrayStride: 2*4,
                 attributes: [{
                     shaderLocation: 0,
                     offset: 0,
                     format: "float32x2",
-                }]
-            }]
+                }],
+            }],
         },
         fragment: {
+            module: lineShader,
             entryPoint: "main_fragment",
-            module: multiplyModule,
             targets: [{ format: canvasFormat }],
-        },
+        }
     });
 
-    const frameTexture = device.createTexture({
-        label: "frame texture",
+    const lineFrame = device.createTexture({
+        label: "line frame",
         format: canvasFormat,
         size: [canvas.width, canvas.height],
-        usage: GPUTextureUsage.TEXTURE_BINDING |
-               GPUTextureUsage.COPY_DST |
-               GPUTextureUsage.RENDER_ATTACHMENT
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
     });
 
-    const sampler = device.createSampler({
-        label: "sampler",
-    });
-
-    const multiplyBindGroup = device.createBindGroup({
-        label: "multiply bind group",
-        layout: multiplyPipeline.getBindGroupLayout(0),
-        entries: [
-            {binding: 0, resource: {buffer: canvasSizeBuffer}},
-            {binding: 1, resource: frameTexture.createView()},
-            {binding: 2, resource: sampler},
-        ]
-    })
-
-    const canvasCornersBuffer = device.createBuffer({
-        label: "canvas corners vertex buffer",
-        size: 2*4*4,
+    const lineVertexBuffer = device.createBuffer({
+        label: "line vertex buffer",
+        size: 2*2*4, // 2 x vec2f
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(canvasCornersBuffer, 0, new Float32Array([
-        -1, 1,
-        -1, -1,
-        1, 1,
-        1, -1,
-    ]));
+
+    const lineBindGroup = device.createBindGroup({
+        label: "line shader bind group",
+        layout: linePipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: {buffer: resolutionUniform}},
+        ],
+    });
+
+    const lineRenderDesc = {
+        label: "line renderer",
+        colorAttachments: [{
+            view: null,
+            clearValue: [0.0, 0.0, 0.0, 0.0],
+            loadOp: "clear",
+            storeOp: "store",
+        }],
+    };
+
+
+
+    // Trail shader stuff.
+    const trailPipeline = device.createRenderPipeline({
+        label: "trail render pipeline",
+        layout: 'auto',
+        primitive: { topology: 'triangle-strip' },
+        vertex: {
+            module: trailShader,
+            entryPoint: "main_vertex",
+            buffers: [{
+                arrayStride: 2*4,
+                attributes: [{
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: "float32x2",
+                }],
+            }],
+        },
+        fragment: {
+            module: trailShader,
+            entryPoint: "main_fragment",
+            targets: [{ format: canvasFormat }],
+        }
+    });
+
+    const trailFrame = device.createTexture({
+        label: "trail frame",
+        format: canvasFormat,
+        size: [canvas.width, canvas.height],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
+    });
+
+    const prevFrame = device.createTexture({
+        label: "previous trail frame",
+        format: canvasFormat,
+        size: [canvas.width, canvas.height],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT |
+               GPUTextureUsage.COPY_SRC |
+               GPUTextureUsage.COPY_DST |
+               GPUTextureUsage.TEXTURE_BINDING,
+    });
+
+    const trailBindGroup = device.createBindGroup({
+        label: "trail bind group",
+        layout: trailPipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: {buffer: resolutionUniform}},
+            {binding: 1, resource: sampler},
+            {binding: 2, resource: lineFrame.createView()},
+            {binding: 3, resource: prevFrame.createView()},
+        ],
+    });
+
+    const trailRenderDesc = {
+        label: "trail renderer",
+        colorAttachments: [{
+            view: null,
+            clearValue: [0.0, 0.0, 0.0, 0.0],
+            loadOp: "clear",
+            storeOp: "store",
+        }],
+    };
+
+
+
+    // Final shader stuff.
+    const finalPipeline = device.createRenderPipeline({
+        label: "final render pipeline",
+        layout: 'auto',
+        primitive: { topology: 'triangle-strip' },
+        vertex: {
+            module: finalShader,
+            entryPoint: "main_vertex",
+            buffers: [{
+                arrayStride: 2*4,
+                attributes: [{
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: "float32x2",
+                }],
+            }],
+        },
+        fragment: {
+            module: finalShader,
+            entryPoint: "main_fragment",
+            targets: [{ format: canvasFormat }],
+        }
+    });
+
+    const finalBindGroup = device.createBindGroup({
+        label: "final bind group",
+        layout: finalPipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: {buffer: resolutionUniform}},
+            {binding: 1, resource: sampler},
+            {binding: 2, resource: trailFrame.createView()},
+        ],
+    });
+
+    const finalRenderDesc = {
+        label: "final renderer",
+        colorAttachments: [{
+            view: null,
+            clearValue: [0.0, 0.0, 0.0, 0.0],
+            loadOp: "clear",
+            storeOp: "store",
+        }],
+    };
 
 
 
     // Rendering.
-    const renderPassDesc = {
-        label: 'render pass',
-        colorAttachments: [{
-            view: null, // to be set during rendering
-            clearValue: [0.0, 0.0, 0.0, 0.0],
-            loadOp: 'clear',
-            storeOp: 'store',
-        }],
-    };
-
     function render() {
-        const encoder = device.createCommandEncoder({ label: 'encoder' });
+        const encoder = device.createCommandEncoder();
 
-        // Line shader pass.
-        renderPassDesc.colorAttachments[0].view = frameTexture.createView();
-        const linePass = encoder.beginRenderPass(renderPassDesc);
-
+        // Line render.
+        lineRenderDesc.colorAttachments[0].view = lineFrame.createView();
+        // lineRenderDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
+        const linePass = encoder.beginRenderPass(lineRenderDesc);
         linePass.setPipeline(linePipeline);
-        linePass.setVertexBuffer(0, lineBuffer);
+        linePass.setVertexBuffer(0, lineVertexBuffer);
         linePass.setBindGroup(0, lineBindGroup);
         linePass.draw(2);
         linePass.end();
 
-        // Multiply shader pass.
-        renderPassDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
-        const multiplyPass = encoder.beginRenderPass(renderPassDesc);
+        // Trail render.
+        trailRenderDesc.colorAttachments[0].view = trailFrame.createView();
+        const trailPass = encoder.beginRenderPass(trailRenderDesc);
+        trailPass.setPipeline(trailPipeline);
+        trailPass.setVertexBuffer(0, canvasVertexBuffer);
+        trailPass.setBindGroup(0, trailBindGroup);
+        trailPass.draw(4);
+        trailPass.end();
 
-        multiplyPass.setPipeline(multiplyPipeline);
-        multiplyPass.setVertexBuffer(0, canvasCornersBuffer);
-        multiplyPass.setBindGroup(0, multiplyBindGroup);
-        multiplyPass.draw(4);
-        multiplyPass.end();
+        encoder.copyTextureToTexture(
+            {texture: trailFrame},
+            {texture: prevFrame},
+            [canvas.width, canvas.height]
+        );
+
+        // Final render.
+        finalRenderDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
+        const finalPass = encoder.beginRenderPass(finalRenderDesc);
+        finalPass.setPipeline(finalPipeline);
+        finalPass.setVertexBuffer(0, canvasVertexBuffer);
+        finalPass.setBindGroup(0, finalBindGroup);
+        finalPass.draw(4);
+        finalPass.end();
 
         device.queue.submit([encoder.finish()]);
     }
@@ -209,11 +271,11 @@ async function main() {
     let frame = 0;
 
     function update() {
-        cornerA[0] = 7 * Math.sin( frame/Math.PI/16);
-        cornerA[1] = 7 * Math.cos( frame/Math.PI/16);
-        cornerB[0] = 7 * Math.sin(-frame/Math.PI/32)*1.01;
-        cornerB[1] = 7 * Math.cos(-frame/Math.PI/32)*1.01;
-        device.queue.writeBuffer(lineBuffer, 0, new Float32Array(cornerA.concat(cornerB)));
+        cornerA[0] = 4 * Math.sin(frame/Math.PI/30);
+        cornerA[1] = 4 * Math.cos(frame/Math.PI/30);
+        cornerB[0] = 10 * Math.sin(-frame/Math.PI/20);
+        cornerB[1] = 10 * Math.cos(-frame/Math.PI/20);
+        device.queue.writeBuffer(lineVertexBuffer, 0, new Float32Array(cornerA.concat(cornerB)));
         ++frame;
     }
 
@@ -223,9 +285,7 @@ async function main() {
         requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
-}
 
-// Prevent Edge's context menu.
-window.onmouseup = event => event.preventDefault();
+}
 
 main().catch(err => console.error(err));
