@@ -48,7 +48,7 @@ async function main() {
     @fragment fn main_fragment(
         @location(0) color: vec4f
     ) -> @location(0) vec4f {
-        return color;
+        return vec4f(color.rgb * color.a, color.a); // premultiplied
     }
     `;
 
@@ -106,12 +106,12 @@ async function main() {
                     color: {
                         operation: "add",
                         srcFactor: "one",
-                        dstFactor: "one-minus-src",
+                        dstFactor: "one-minus-src-alpha",
                     },
                     alpha: {
                         operation: "add",
                         srcFactor: "one",
-                        dstFactor: "one-minus-src",
+                        dstFactor: "one-minus-src-alpha",
                     }
                 }
             }],
@@ -122,13 +122,13 @@ async function main() {
 
     // Triangle data.
     const triangles = [{
-        color: [1.0, 0.0, 0.0, 0.5],
-        scale: [200, 200],
-        offset: [-50, -50],
-    }, {
-        color: [0.0, 1.0, 0.0, 0.01],
+        color: [0.0, 1.0, 0.0, 0.9], // unassociated alpha
         scale: [300, 300],
         offset: [50, 50],
+    }, {
+        color: [1.0, 0.0, 0.0, 0.4], // unassociated alpha
+        scale: [300, 300],
+        offset: [-50, -50],
     }];
 
 
