@@ -27,7 +27,6 @@ async function main() {
     // General shader stuff.
     const lineShader = device.createShaderModule({ label: "line shader", code: await fetchText('line.wgsl') });
     const trailShader = device.createShaderModule({ label: "trail shader", code: await fetchText('trail.wgsl') });
-    const finalShader = device.createShaderModule({ label: "final shader", code: await fetchText('final.wgsl') });
 
     const canvasVertexBuffer = device.createBuffer({
         label: "canvas vertex buffer",
@@ -132,7 +131,40 @@ async function main() {
         fragment: {
             module: trailShader,
             entryPoint: "main_fragment",
-            targets: [{ format: canvasFormat }],
+            targets: [{
+                // canvas, location 0
+                // (premultiplied)
+                format: canvasFormat,
+                blend: {
+                    color: {
+                        operation:"add",
+                        srcFactor:"one",
+                        dstFactor:"one-minus-src-alpha",
+                    },
+                    alpha: {
+                        operation:"add",
+                        srcFactor:"one",
+                        dstFactor:"one-minus-src-alpha",
+                    }
+                }
+            }, {
+                // trail framebuffer, location 1
+                // (unassociated alpha)
+                format: canvasFormat,
+                blend: {
+                    // NOTE: i'm not sure if these values are appropriate!
+                    color: {
+                        operation:"add",
+                        srcFactor:"one",
+                        dstFactor:"zero",
+                    },
+                    alpha: {
+                        operation:"add",
+                        srcFactor:"one",
+                        dstFactor:"zero",
+                    }
+                }
+            }],
         }
     });
 
@@ -171,48 +203,7 @@ async function main() {
             clearValue: [0.0, 0.0, 0.0, 0.0],
             loadOp: "clear",
             storeOp: "store",
-        }],
-    };
-
-
-
-    // Final shader stuff.
-    const finalPipeline = device.createRenderPipeline({
-        label: "final render pipeline",
-        layout: 'auto',
-        primitive: { topology: 'triangle-strip' },
-        vertex: {
-            module: finalShader,
-            entryPoint: "main_vertex",
-            buffers: [{
-                arrayStride: 2*4,
-                attributes: [{
-                    shaderLocation: 0,
-                    offset: 0,
-                    format: "float32x2",
-                }],
-            }],
-        },
-        fragment: {
-            module: finalShader,
-            entryPoint: "main_fragment",
-            targets: [{ format: canvasFormat }],
-        }
-    });
-
-    const finalBindGroup = device.createBindGroup({
-        label: "final bind group",
-        layout: finalPipeline.getBindGroupLayout(0),
-        entries: [
-            {binding: 0, resource: {buffer: resolutionUniform}},
-            {binding: 1, resource: sampler},
-            {binding: 2, resource: trailFrame.createView()},
-        ],
-    });
-
-    const finalRenderDesc = {
-        label: "final renderer",
-        colorAttachments: [{
+        }, {
             view: null,
             clearValue: [0.0, 0.0, 0.0, 0.0],
             loadOp: "clear",
@@ -228,7 +219,6 @@ async function main() {
 
         // Line render.
         lineRenderDesc.colorAttachments[0].view = lineFrame.createView();
-        // lineRenderDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
         const linePass = encoder.beginRenderPass(lineRenderDesc);
         linePass.setPipeline(linePipeline);
         linePass.setVertexBuffer(0, lineVertexBuffer);
@@ -237,7 +227,8 @@ async function main() {
         linePass.end();
 
         // Trail render.
-        trailRenderDesc.colorAttachments[0].view = trailFrame.createView();
+        trailRenderDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
+        trailRenderDesc.colorAttachments[1].view = trailFrame.createView();
         const trailPass = encoder.beginRenderPass(trailRenderDesc);
         trailPass.setPipeline(trailPipeline);
         trailPass.setVertexBuffer(0, canvasVertexBuffer);
@@ -250,15 +241,6 @@ async function main() {
             {texture: prevFrame},
             [canvas.width, canvas.height]
         );
-
-        // Final render.
-        finalRenderDesc.colorAttachments[0].view = context.getCurrentTexture().createView();
-        const finalPass = encoder.beginRenderPass(finalRenderDesc);
-        finalPass.setPipeline(finalPipeline);
-        finalPass.setVertexBuffer(0, canvasVertexBuffer);
-        finalPass.setBindGroup(0, finalBindGroup);
-        finalPass.draw(4);
-        finalPass.end();
 
         device.queue.submit([encoder.finish()]);
     }
