@@ -14,11 +14,12 @@
             display: flex;  /* lets us center the canvas vertically */
             flex-direction: column;
             height: 100%;
+            image-rendering: pixelated;
         }
         canvas {
             background-color: whitesmoke;
-            width: 600px;
-            height: 400px;
+            width: 512px;
+            height: 512px;
             margin: auto;
             display: block; /* ...to work with the body's `display: flex`, i guess? ill check later */
         }
@@ -36,7 +37,7 @@
 </head>
 
 <body>
+    <img src="atlas.png" style="display: none;">
     <canvas></canvas>
-    <p>0</p>
 </body>
 </html>

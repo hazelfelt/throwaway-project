@@ -9,8 +9,9 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+    const zoom = 4;
+    canvas.width  = canvas.clientWidth / zoom;
+    canvas.height = canvas.clientHeight / zoom;
 
     const context = canvas.getContext('webgpu');
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -21,74 +22,39 @@ async function main() {
 
 
 
-    // Shader.
+    // Chunk rendering shader.
     const wgsl = `
-    struct Triangle {
-        color: array<vec3f, 3>,
-        scale: vec2f,
-        offset: vec2f,
-    };
-
-    struct Vertex {
-        @location(0) color: vec3f,
-        @builtin(position) position: vec4f,
+    @vertex fn main_vertex(@location(0) pos: vec2f) -> @builtin(position) vec4f {
+        return vec4f(pos, 0.0, 1.0);
     }
 
-    @group(0) @binding(0) var<uniform> frame: u32;
-    @group(0) @binding(1) var<uniform> initial: Triangle;
-    @group(0) @binding(2) var<uniform> delta: Triangle;
-    @group(0) @binding(3) var<uniform> wobble_intensity: f32;
-
-    const corner = array<vec2f, 3>(
-        vec2f( 0.0,  0.5),  // top center
-        vec2f(-0.5, -0.5),  // bottom left
-        vec2f( 0.5, -0.5)   // bottom right
-    );
-
-    @vertex fn main_vertex(
-        @builtin(vertex_index) v: u32,
-        @builtin(instance_index) i: u32,
-    ) -> Vertex {
-
-        let triangle = instance_triangle(i);
-
-        let canvas_position = corner[v] * triangle.scale + triangle.offset;
-        let wobble_position = canvas_position + vec2(
-             sin(f32(frame+i*4) / 3.0) * wobble_intensity,
-            -cos(f32(frame+i*4) / 3.0) * wobble_intensity,
-        );
-
-        return Vertex(triangle.color[v], vec4(wobble_position, 0.0, 1.0));
-    }
-
-    // Returns the triangle specific to this instance.
-    fn instance_triangle(i: u32) -> Triangle {
-
-        // NOTE: this part here is a little redundant, because each time
-        // it's called, it calculates 3 vertices worth of color...
-        // yet it's called once every vertex!
-        //
-        // i wonder what a better way to do this would be...
-        let color = array<vec3f, 3>(
-            initial.color[0] + f32(i)*delta.color[0],
-            initial.color[1] + f32(i)*delta.color[1],
-            initial.color[2] + f32(i)*delta.color[2],
-        );
-
-        let scale  = initial.scale  + f32(i)*delta.scale;
-        let offset = initial.offset + f32(i)*delta.offset;
-
-        return Triangle(color, scale, offset);
-    }
+    @group(0) @binding(0) var atlas: texture_2d<f32>;
+    @group(0) @binding(1) var atlas_sampler: sampler;
+    @group(0) @binding(2) var<uniform> atlas_size: vec2u;
+    @group(0) @binding(3) var<storage, read> chunk: array<array<u32, 16>, 16>;
 
     @fragment fn main_fragment(
-        @location(0) color: vec3f,
+        @builtin(position) pos: vec4f
     ) -> @location(0) vec4f {
-        return vec4f(color, 1.0);
+
+        // The texture ID we will be sampling.
+        let id = chunk[u32(pos.y)/8u][u32(pos.x)/8u];
+
+        // The square on the atlas of which this texture is located.
+        let atlas_pos = vec2u(
+            id % atlas_size.x,
+            id / atlas_size.x
+        );
+
+        // UV coordinates on the atlas.
+        let uv = (vec2f(atlas_pos) + fract(pos.xy/8.0)) / vec2f(atlas_size);
+
+        // Sampler.
+        return textureSample(atlas, atlas_sampler, uv);
     }`;
 
     const module = device.createShaderModule({
-        label: "it's a shader!",
+        label: "chunk shader",
         code: wgsl,
     });
 
@@ -96,11 +62,22 @@ async function main() {
 
     // Pipeline.
     const pipeline = device.createRenderPipeline({
-        label: "it's a pipeline!",
+        label: "chunk rendering pipeline",
         layout: 'auto',
+        primitive: {
+            topology: "triangle-strip"
+        },
         vertex: {
             module,
             entryPoint: 'main_vertex',
+            buffers: [{
+                arrayStride: 2*4,
+                attributes: [{
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: 'float32x2'
+                }]
+            }],
         },
         fragment: {
             module,
@@ -111,69 +88,75 @@ async function main() {
 
 
 
-
-    // Triangle data.
-    const triangleCount = 10;
-
-    const initialTriangle = {
-        color: [
-            [ -0.3,  0.3,  0.3 ],
-            [ -0.3,  0.6,  0.3 ],
-            [ -0.3, -0.1,  0.3 ],
-        ],
-        scale: [1.0, 1.0],
-        offset: [-0.3, -0.3],
-    };
-
-    const deltaTriangle = {
-        color: [
-            [ 0.1, 0.1, 0.1 ],
-            [ 0.1, 0.1, 0.1 ],
-            [ 0.1, 0.1, 0.1 ],
-        ],
-        scale: [-0.09, -0.09],
-        offset: [0.1, 0.1],
-    };
+    // Vertex buffer.
+    const vertexBuffer = device.createBuffer({
+        label: "vertex buffer",
+        size: 2*4*4,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(
+        vertexBuffer, 0,
+        new Float32Array([
+            -1,  1,
+            -1, -1,
+             1,  1,
+             1, -1,
+        ])
+    );
 
 
 
-    // Given triangle data, this function writes to a GPU buffer and returns it.
-    function triangleBuffer(triangle, label) {
-        const buffer = device.createBuffer({
-            label,
-            size: 4 * 16, // 16 floats per triangle (includes padding).
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-        const array = new Float32Array(16);
-        array.set(triangle.color[0], 0);
-        array.set(triangle.color[1], 4);
-        array.set(triangle.color[2], 8);
-        array.set(triangle.scale,   12);
-        array.set(triangle.offset,  14);
-        device.queue.writeBuffer(buffer, 0, array);
+    // Atlas .png file and sampler.
+    const atlasElement = document.querySelector("img");
+    const source = await createImageBitmap(atlasElement, { colorSpaceConversion: "none" });
+    const texture = device.createTexture({
+        label: "atlas texture",
+        format: 'rgba8unorm',
+        size: [source.width, source.height],
+        usage: GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture(
+        { source, flipY: false },
+        { texture },
+        { width: source.width, height: source.height },
+    );
 
-        return buffer;
+    const sampler = device.createSampler({
+        magFilter: 'nearest',
+    });
+
+
+
+    // Atlas size buffer.
+    const atlasSizeBuffer = device.createBuffer({
+        label: "atlas size uniform",
+        size: 2*4, // one vec2u
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    device.queue.writeBuffer(
+        atlasSizeBuffer,
+        0,
+        new Uint32Array([4, 1])
+    );
+
+    // Chunk buffer.
+    const chunkBuffer = device.createBuffer({
+        label: "chunk storage buffer",
+        size: 16*16*4, // 16x16 grid of u32s
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+
+    const chunkArray = new Uint32Array(16*16);
+    for (let y = 0; y < 16; ++y) {
+        for (let x = 0; x < 16; ++x) {
+            chunkArray.set([(y+x/2)%4], y*16 + x);
+        }
     }
 
-    // Triangle buffers
-    const initialBuffer = triangleBuffer(initialTriangle, "initial triangle buffer");
-    const deltaBuffer = triangleBuffer(deltaTriangle, "delta triangle buffer");
-
-    // Frame number buffer.
-    const frameBuffer = device.createBuffer({
-        label: "frame buffer",
-        size: 4, // one single u32,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([0]));
-
-    // Wobble intensity buffer.
-    const wobbleIntensityBuffer = device.createBuffer({
-        label: "wobble intensity buffer",
-        size: 4, // one single f32,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(wobbleIntensityBuffer, 0, new Float32Array([0.0]));
+    device.queue.writeBuffer(chunkBuffer, 0, chunkArray);
 
 
 
@@ -182,65 +165,40 @@ async function main() {
         label: "bind group",
         layout: pipeline.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: { buffer: frameBuffer } },
-            { binding: 1, resource: { buffer: initialBuffer } },
-            { binding: 2, resource: { buffer: deltaBuffer } },
-            { binding: 3, resource: { buffer: wobbleIntensityBuffer } },
-        ],
+            {binding: 0, resource: texture.createView()},
+            {binding: 1, resource: sampler},
+            {binding: 2, resource: {buffer: atlasSizeBuffer}},
+            {binding: 3, resource: {buffer: chunkBuffer}},
+        ]
     })
 
 
 
-    // Render.
-    function render() {
+    // Command encoder, render pass.
+    const encoder = device.createCommandEncoder({ label: 'encoder' });
+    const pass = encoder.beginRenderPass({
+        label: 'render pass',
+        colorAttachments: [
+            { // We're rendering to the canvas's current texture.
+                view: context.getCurrentTexture().createView(),
+                clearValue: [0.02, 0.05, 0.1, 1.0],
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+        ],
+    });
 
-        // Command encoder, render pass.
-        const encoder = device.createCommandEncoder({ label: 'encoder' });
-        const pass = encoder.beginRenderPass({
-            label: 'render pass',
-            colorAttachments: [
-                { // We're rendering to the canvas's current texture.
-                    view: context.getCurrentTexture().createView(),
-                    clearValue: [1.0, 1.0, 1.0, 1.0],
-                    loadOp: 'clear',
-                    storeOp: 'store',
-                },
-            ],
-        });
+    pass.setPipeline(pipeline);
+    pass.setVertexBuffer(0, vertexBuffer);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(4);
+    pass.end();
 
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.draw(3, triangleCount);  // draw 3 vertices for each triangle
-        pass.end();
-
-        // We're done. Form a command buffer from `encoder`, and submit it.
-        device.queue.submit([encoder.finish()]);
-
-    }
-    render();
-
-
-
-    // (descriptive comment pending)
-    const counterElement = document.querySelector("p");
-    let counter = 0;
-    let wobbleIntensity = 0.0;
-    canvas.onmousedown = () => wobbleIntensity = wobbleIntensity * 2 + 0.15;
-
-    function loop() {
-
-        // NOTE: i'm guessing it's really inefficient to make a new array every frame
-        // i'll fix this whenever i refactor things later
-        device.queue.writeBuffer(frameBuffer, 0, new Uint32Array([counter]));
-        device.queue.writeBuffer(wobbleIntensityBuffer, 0, new Float32Array([wobbleIntensity]));
-        render();
-        requestAnimationFrame(loop);
-
-        counterElement.innerText = ++counter;
-        wobbleIntensity /= 1.05;
-    }
-    requestAnimationFrame(loop);
+    // We're done. Form a command buffer from `encoder`, and submit it.
+    device.queue.submit([encoder.finish()]);
 }
+
+
 
 // Prevent Edge's context menu.
 window.onmouseup = event => event.preventDefault();
