@@ -5,8 +5,6 @@ struct Vertex {
     @location(0) uv: vec2f,
 }
 
-
-
 @vertex fn main_vertex(@location(0) pos: vec2f) -> Vertex {
     let clip_pos = vec4f(pos, 0.0, 1.0);
     let uv = pos * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
@@ -27,9 +25,9 @@ struct Fragment {
     let line_sample = textureSample(line_frame, frame_sampler, uv);
     let trail_sample = textureSample(prev_frame, frame_sampler, uv);
 
-    let trail = select(trail_sample, line_sample, line_sample.a > 0.01) - vec4f(0.02, 0.03, 0.02, 0.01);
+    let trail = select(trail_sample, line_sample, line_sample.a > 0.01) - vec4f(0.01, 0.03, 0.015, 0.01);
 
-    let canvas = select(line_sample, trail, trail.a > 0.01);
+    let canvas = select(line_sample, trail, trail.a > 0.25);
     let canvas_premultiplied = vec4f(canvas.rgb * canvas.a, canvas.a);
 
     return Fragment(canvas_premultiplied, trail);

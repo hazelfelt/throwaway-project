@@ -200,7 +200,7 @@ async function main() {
         label: "trail renderer",
         colorAttachments: [{
             view: null,
-            clearValue: [0.0, 0.0, 0.0, 0.0],
+            clearValue: [0.02, 0.02, 0.02, 1.0],
             loadOp: "clear",
             storeOp: "store",
         }, {
@@ -253,10 +253,10 @@ async function main() {
     let frame = 0;
 
     function update() {
-        cornerA[0] = 4 * Math.sin(frame/Math.PI/30);
-        cornerA[1] = 4 * Math.cos(frame/Math.PI/30);
-        cornerB[0] = 10 * Math.sin(-frame/Math.PI/20);
-        cornerB[1] = 10 * Math.cos(-frame/Math.PI/20);
+        cornerA[0] = 2 * Math.sin(frame/Math.PI/7.5);
+        cornerA[1] = 2 * Math.cos(frame/Math.PI/7.5);
+        cornerB[0] = 10 * Math.sin(frame/Math.PI/7.5);
+        cornerB[1] = 10 * Math.cos(frame/Math.PI/7.5);
         device.queue.writeBuffer(lineVertexBuffer, 0, new Float32Array(cornerA.concat(cornerB)));
         ++frame;
     }
