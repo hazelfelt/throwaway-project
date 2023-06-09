@@ -8,23 +8,29 @@
 @group(1) @binding(1) var<uniform> chunk_coords: vec2f;
 
 struct Vertex {
-    @builtin(position) pos: vec4f,
-    @location(0) pixel: vec2f,
+    @builtin(position) clip_pos: vec4f,
+    @location(0) chunk_pixel: vec2f,
 }
 
-@vertex fn main_vertex(@location(0) pixel: vec2f) -> Vertex {
-    let offset = chunk_coords * 16*8;
-    let pos = (pixel - camera - offset) * 2.0 / resolution;
-    return Vertex(vec4f(pos, 0.0, 1.0), pixel);
+@vertex fn main_vertex(@location(0) chunk_pixel: vec2f) -> Vertex {
+    let chunk_offset = chunk_coords * 16.0 * 8.0;
+    let pixel = chunk_pixel - camera - chunk_offset; // "pixel space"
+    let clip_pos = pixel * 2.0 / resolution; // clip space
+
+    return Vertex(
+        vec4f(clip_pos, 0.0, 1.0),
+        chunk_pixel
+    );
 }
 
 @fragment fn main_fragment(
-    @location(0) pos: vec2f
+    @location(0) chunk_pixel: vec2f
 ) -> @location(0) vec4f {
 
-    let id = chunk[u32(pos.y)/8u][u32(pos.x)/8u];
-    let atlas_pos = vec2u(id % atlas_size.x, id / atlas_size.x);
-    let uv = (vec2f(atlas_pos) + fract(pos/8.0)) / vec2f(atlas_size);
+    let chunk_tile = vec2u(chunk_pixel) / 8u;
+    let id = chunk[chunk_tile.y][chunk_tile.x]; // texture id
+    let atlas_loc = vec2u(id % atlas_size.x, id / atlas_size.x);
+    let uv = (vec2f(atlas_loc) + (1.0 - fract(chunk_pixel/8.0))) / vec2f(atlas_size);
 
     return textureSample(atlas, atlas_sampler, uv);
 }

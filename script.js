@@ -30,7 +30,7 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    const zoom = 2;
+    const zoom = 1;
     canvas.width  = canvas.clientWidth / zoom;
     canvas.height = canvas.clientHeight / zoom;
 
@@ -45,7 +45,6 @@ async function main() {
 
     // Chunk rendering shader.
     const wgsl = await fetchText('/shader.wgsl');
-
     const module = device.createShaderModule({
         label: "chunk shader",
         code: wgsl,
@@ -57,9 +56,7 @@ async function main() {
     const pipeline = device.createRenderPipeline({
         label: "chunk rendering pipeline",
         layout: 'auto',
-        primitive: {
-            topology: "triangle-strip"
-        },
+        primitive: { topology: "triangle-strip" },
         vertex: {
             module,
             entryPoint: 'main_vertex',
@@ -162,7 +159,7 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 5;
+            let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 8;
             chunkArray.set([texture], offset);
         }
     }
@@ -186,7 +183,8 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 6;
+            // let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 8;
+            let texture = 2;
             anotherChunkArray.set([texture], offset);
         }
     }
@@ -266,14 +264,16 @@ async function main() {
 
 
     // Stateful things.
-    let x = 64;
-    let y = 0;
+    let x = 256 - 16 + 0.5;
+    let y = 16;
     let frame = 0;
 
     function update() {
-        y = 64 + 16 * Math.sin(frame / 30);
-        x = 128 + 16 * Math.cos(frame / 30);
+        // x -= 0.001;
+        // x = 128 + 16 * Math.cos(frame / 120);
         device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([x, y]));
+
+        document.querySelector('p').innerText = `${frame} / (${x}, ${y})`;
         ++frame;
     }
 
