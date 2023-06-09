@@ -30,7 +30,7 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    const zoom = 4;
+    const zoom = 2;
     canvas.width  = canvas.clientWidth / zoom;
     canvas.height = canvas.clientHeight / zoom;
 
@@ -152,7 +152,7 @@ async function main() {
     });
     device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([64, 64]));
 
-    // Chunk buffer.
+    // Chunk buffer and offset buffer.
     const chunkBuffer = device.createBuffer({
         label: "chunk storage buffer",
         size: 16*16*4, // 16x16 grid of u32s
@@ -162,11 +162,18 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            let texture = Math.sqrt(x*x+y*y) % 5;
+            let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 5;
             chunkArray.set([texture], offset);
         }
     }
     device.queue.writeBuffer(chunkBuffer, 0, chunkArray);
+
+    const chunkOffsetBuffer = device.createBuffer({
+        label: "chunk offset buffer",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(chunkOffsetBuffer, 0, new Float32Array([0.0, 0.0]));
 
     // Another chunk buffer.
     const anotherChunkBuffer = device.createBuffer({
@@ -185,6 +192,13 @@ async function main() {
     }
     device.queue.writeBuffer(anotherChunkBuffer, 0, anotherChunkArray);
 
+    const anotherChunkOffsetBuffer = device.createBuffer({
+        label: "another chunk offset buffer",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(anotherChunkOffsetBuffer, 0, new Float32Array([-1.0, 0.0]));
+
     // Bind groups.
     const bindGroup = device.createBindGroup({
         label: "bind group",
@@ -201,13 +215,19 @@ async function main() {
     const chunkBindGroup = device.createBindGroup({
         label: "chunk bind group",
         layout: pipeline.getBindGroupLayout(1),
-        entries: [{binding: 0, resource: {buffer: chunkBuffer}}],
+        entries: [
+            {binding: 0, resource: {buffer: chunkBuffer}},
+            {binding: 1, resource: {buffer: chunkOffsetBuffer}},
+        ],
     });
 
     const anotherChunkBindGroup = device.createBindGroup({
         label: "another chunk bind group",
         layout: pipeline.getBindGroupLayout(1),
-        entries: [{binding: 0, resource: {buffer: anotherChunkBuffer}}],
+        entries: [
+            {binding: 0, resource: {buffer: anotherChunkBuffer}},
+            {binding: 1, resource: {buffer: anotherChunkOffsetBuffer}},
+        ],
     });
 
 
@@ -251,8 +271,8 @@ async function main() {
     let frame = 0;
 
     function update() {
-        y = 64 + 8 * Math.sin(frame / 120);
-        x = 64 + 8 * Math.cos(frame / 120);
+        y = 64 + 16 * Math.sin(frame / 30);
+        x = 128 + 16 * Math.cos(frame / 30);
         device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([x, y]));
         ++frame;
     }

@@ -5,7 +5,7 @@
 @group(0) @binding(4) var<uniform> camera: vec2f;
 
 @group(1) @binding(0) var<storage, read> chunk: array<array<u32, 16>, 16>;
-@group(1) @binding(1) var<uniform> chunk_coords: vec2u;
+@group(1) @binding(1) var<uniform> chunk_coords: vec2f;
 
 struct Vertex {
     @builtin(position) pos: vec4f,
@@ -13,7 +13,8 @@ struct Vertex {
 }
 
 @vertex fn main_vertex(@location(0) pixel: vec2f) -> Vertex {
-    let pos = (pixel - camera) * 2.0 / resolution;
+    let offset = chunk_coords * 16*8;
+    let pos = (pixel - camera - offset) * 2.0 / resolution;
     return Vertex(vec4f(pos, 0.0, 1.0), pixel);
 }
 
