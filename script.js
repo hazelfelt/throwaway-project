@@ -130,7 +130,7 @@ async function main() {
     device.queue.writeBuffer(
         atlasSizeBuffer,
         0,
-        new Uint32Array([4, 1])
+        new Uint32Array([4, 2])
     );
 
     // Resolution buffer.
@@ -162,7 +162,7 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            let texture = Math.sqrt(x*x+y*y) % 4;
+            let texture = Math.sqrt(x*x+y*y) % 5;
             chunkArray.set([texture], offset);
         }
     }
@@ -179,7 +179,7 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 4;
+            let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 6;
             anotherChunkArray.set([texture], offset);
         }
     }
