@@ -49,10 +49,14 @@ async function main() {
             module,
             entryPoint: 'main_vertex',
             buffers: [{
-                arrayStride: 2*4,
+                arrayStride: 4*4,
                 attributes: [{
                     shaderLocation: 0,
                     offset: 0,
+                    format: 'float32x2'
+                }, {
+                    shaderLocation: 1,
+                    offset: 2*4,
                     format: 'float32x2'
                 }]
             }],
@@ -69,16 +73,16 @@ async function main() {
     // Vertex buffer.
     const vertexBuffer = device.createBuffer({
         label: "vertex buffer",
-        size: 2*4*4,
+        size: 4*4*4,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(
         vertexBuffer, 0,
         new Float32Array([
-            -1,  1,
-            -1, -1,
-             1,  1,
-             1, -1,
+            -1,  1, 0, 0,
+            -1, -1, 0, 128,
+             1,  1, 128, 0,
+             1, -1, 128, 128,
         ])
     );
 
@@ -105,8 +109,6 @@ async function main() {
         magFilter: 'nearest',
     });
 
-
-
     // Atlas size buffer.
     const atlasSizeBuffer = device.createBuffer({
         label: "atlas size uniform",
@@ -119,6 +121,14 @@ async function main() {
         0,
         new Uint32Array([4, 1])
     );
+
+    // Camera buffer.
+    const cameraBuffer = device.createBuffer({
+        label: "camera uniform",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([0.0, 0.0]));
 
     // Chunk buffer.
     const chunkBuffer = device.createBuffer({
@@ -153,17 +163,15 @@ async function main() {
     }
     device.queue.writeBuffer(anotherChunkBuffer, 0, anotherChunkArray);
 
-
-
     // Bind groups.
-    const atlasBindGroup = device.createBindGroup({
-        label: "atlas bind group",
+    const bindGroup = device.createBindGroup({
+        label: "bind group",
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             {binding: 0, resource: texture.createView()},
             {binding: 1, resource: sampler},
             {binding: 2, resource: {buffer: atlasSizeBuffer}},
-            // {binding: 3, resource: {buffer: chunkBuffer}},
+            {binding: 3, resource: {buffer: cameraBuffer}},
         ]
     });
 
@@ -197,7 +205,7 @@ async function main() {
 
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
-    pass.setBindGroup(0, atlasBindGroup);
+    pass.setBindGroup(0, bindGroup);
 
     pass.setBindGroup(1, chunkBindGroup);
     pass.draw(4);
