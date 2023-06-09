@@ -1,3 +1,18 @@
+// TODO: there's some really weird texture bleeding(??) going on??
+// *specifically* when i nudge the chunk down by like. 1.6 pixels.
+// Then there's an extra row of garbage pixels at the very top
+//
+// im not sure why it's happening but im way too tired tonight to bother figuring it out lol
+//
+// it's definitely due to some floating point magic, though.
+// maybe due to the fact that, there's a Lotta mingling of u32's AND f32's in the fragment shader?
+// maybe it's because [one of the coordinate systems im using] is centered on 0.0, 0.0, instead of 0.5, 0.5(??)
+//
+// i dont know. that's just me throwing stuff at the wall. it's for future me to figure out.
+
+// ALSO TODO:
+// make sure both chunks get rendered, rn they're perfectly superimposed on top of each other lol
+
 async function fetchText(url) {
     const response = await fetch(url);
     const text = await response.text();
@@ -49,14 +64,10 @@ async function main() {
             module,
             entryPoint: 'main_vertex',
             buffers: [{
-                arrayStride: 4*4,
+                arrayStride: 2*4,
                 attributes: [{
                     shaderLocation: 0,
                     offset: 0,
-                    format: 'float32x2'
-                }, {
-                    shaderLocation: 1,
-                    offset: 2*4,
                     format: 'float32x2'
                 }]
             }],
@@ -73,16 +84,16 @@ async function main() {
     // Vertex buffer.
     const vertexBuffer = device.createBuffer({
         label: "vertex buffer",
-        size: 4*4*4,
+        size: 2*4*4,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(
         vertexBuffer, 0,
         new Float32Array([
-            -1,  1, 0, 0,
-            -1, -1, 0, 128,
-             1,  1, 128, 0,
-             1, -1, 128, 128,
+            0, 0,
+            0, 128,
+            128, 0,
+            128, 128,
         ])
     );
 
@@ -122,13 +133,24 @@ async function main() {
         new Uint32Array([4, 1])
     );
 
+    // Resolution buffer.
+    const resolutionBuffer = device.createBuffer({
+        label: "canvas resolution uniform",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(
+        resolutionBuffer, 0,
+        new Float32Array([canvas.width, canvas.height])
+    );
+
     // Camera buffer.
     const cameraBuffer = device.createBuffer({
         label: "camera uniform",
         size: 2*4, // one vec2f
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([0.0, 0.0]));
+    device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([64, 64]));
 
     // Chunk buffer.
     const chunkBuffer = device.createBuffer({
@@ -171,7 +193,8 @@ async function main() {
             {binding: 0, resource: texture.createView()},
             {binding: 1, resource: sampler},
             {binding: 2, resource: {buffer: atlasSizeBuffer}},
-            {binding: 3, resource: {buffer: cameraBuffer}},
+            {binding: 3, resource: {buffer: resolutionBuffer}},
+            {binding: 4, resource: {buffer: cameraBuffer}},
         ]
     });
 
@@ -188,35 +211,59 @@ async function main() {
     });
 
 
+    function render() {
 
-    // Command encoder, render pass.
-    const encoder = device.createCommandEncoder({ label: 'encoder' });
-    const pass = encoder.beginRenderPass({
-        label: 'render pass',
-        colorAttachments: [
-            { // We're rendering to the canvas's current texture.
-                view: context.getCurrentTexture().createView(),
-                clearValue: [0.02, 0.05, 0.1, 1.0],
-                loadOp: 'clear',
-                storeOp: 'store',
-            },
-        ],
-    });
+        // Command encoder, render pass.
+        const encoder = device.createCommandEncoder({ label: 'encoder' });
+        const pass = encoder.beginRenderPass({
+            label: 'render pass',
+            colorAttachments: [
+                { // We're rendering to the canvas's current texture.
+                    view: context.getCurrentTexture().createView(),
+                    clearValue: [0.02, 0.05, 0.1, 1.0],
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                },
+            ],
+        });
 
-    pass.setPipeline(pipeline);
-    pass.setVertexBuffer(0, vertexBuffer);
-    pass.setBindGroup(0, bindGroup);
+        pass.setPipeline(pipeline);
+        pass.setVertexBuffer(0, vertexBuffer);
+        pass.setBindGroup(0, bindGroup);
 
-    pass.setBindGroup(1, chunkBindGroup);
-    pass.draw(4);
+        pass.setBindGroup(1, chunkBindGroup);
+        pass.draw(4);
 
-    pass.setBindGroup(1, anotherChunkBindGroup);
-    pass.draw(4);
+        pass.setBindGroup(1, anotherChunkBindGroup);
+        pass.draw(4);
 
-    pass.end();
+        pass.end();
 
-    // We're done. Form a command buffer from `encoder`, and submit it.
-    device.queue.submit([encoder.finish()]);
+        // We're done. Form a command buffer from `encoder`, and submit it.
+        device.queue.submit([encoder.finish()]);
+    }
+
+
+
+    // Stateful things.
+    let x = 64;
+    let y = 0;
+    let frame = 0;
+
+    function update() {
+        y = 64 + 8 * Math.sin(frame / 120);
+        x = 64 + 8 * Math.cos(frame / 120);
+        device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([x, y]));
+        ++frame;
+    }
+
+    // Loop.
+    function loop() {
+        update();
+        render();
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
 }
 
 

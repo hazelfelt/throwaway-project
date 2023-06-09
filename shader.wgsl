@@ -1,20 +1,19 @@
 @group(0) @binding(0) var atlas: texture_2d<f32>;
 @group(0) @binding(1) var atlas_sampler: sampler;
 @group(0) @binding(2) var<uniform> atlas_size: vec2u;
-@group(0) @binding(3) var<uniform> camera: vec2f;
+@group(0) @binding(3) var<uniform> resolution: vec2f;
+@group(0) @binding(4) var<uniform> camera: vec2f;
 
 @group(1) @binding(0) var<storage, read> chunk: array<array<u32, 16>, 16>;
+@group(1) @binding(1) var<uniform> chunk_coords: vec2u;
 
 struct Vertex {
     @builtin(position) pos: vec4f,
     @location(0) pixel: vec2f,
 }
 
-@vertex fn main_vertex(
-    @location(0) pos: vec2f,
-    @location(1) pixel: vec2f,
-) -> Vertex {
-    let dummy = camera;
+@vertex fn main_vertex(@location(0) pixel: vec2f) -> Vertex {
+    let pos = (pixel - camera) * 2.0 / resolution;
     return Vertex(vec4f(pos, 0.0, 1.0), pixel);
 }
 
