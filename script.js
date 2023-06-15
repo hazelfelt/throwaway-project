@@ -30,9 +30,9 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    const zoom = 1;
-    canvas.width  = canvas.clientWidth / zoom;
-    canvas.height = canvas.clientHeight / zoom;
+    const pixel_scale = 1;
+    canvas.width  = canvas.clientWidth / pixel_scale;
+    canvas.height = canvas.clientHeight / pixel_scale;
 
     const context = canvas.getContext('webgpu');
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -149,6 +149,14 @@ async function main() {
     });
     device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([64, 64]));
 
+    // Zoom buffer.
+    const zoomBuffer = device.createBuffer({
+        label: "zoom uniform",
+        size: 4, // one f32
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(zoomBuffer, 0, new Float32Array([1]));
+
     // Chunk buffer and offset buffer.
     const chunkBuffer = device.createBuffer({
         label: "chunk storage buffer",
@@ -207,6 +215,7 @@ async function main() {
             {binding: 2, resource: {buffer: atlasSizeBuffer}},
             {binding: 3, resource: {buffer: resolutionBuffer}},
             {binding: 4, resource: {buffer: cameraBuffer}},
+            {binding: 5, resource: {buffer: zoomBuffer}},
         ]
     });
 
@@ -264,18 +273,76 @@ async function main() {
 
 
     // Stateful things.
-    let x = 256 - 16 + 0.5;
-    let y = 16;
+    // ...Controls.
+    let up = false;
+    let left = false;
+    let down = false;
+    let right = false;
+
+    let in_ = false;
+    let out = false;
+
+    window.addEventListener("keydown", function(e) {
+        switch (e.key.toLowerCase()) {
+            case "w": up    = true; break;
+            case "a": left  = true; break;
+            case "s": down  = true; break;
+            case "d": right = true; break;
+
+            case "shift": in_ = true; break;
+            case " ":     out = true; break;
+        }
+    });
+
+    window.addEventListener("keyup", function(e) {
+        switch (e.key.toLowerCase()) {
+            case "w": up    = false; break;
+            case "a": left  = false; break;
+            case "s": down  = false; break;
+            case "d": right = false; break;
+
+            case "shift": in_ = false; break;
+            case " ":     out = false; break;
+        }
+    });
+
+    window.addEventListener("blur", function(e) {
+        up    = false;
+        left  = false;
+        down  = false;
+        right = false;
+
+        in_ = false;
+        out = false;
+    });
+
+    // Camera, etc.
+    let x = 0.2
+    let y = 0.2;
+    let zoom = 1;
     let frame = 0;
 
     function update() {
-        // x -= 0.001;
-        // x = 128 + 16 * Math.cos(frame / 120);
+
+        // Movement.
+        if (up) y    += 1;
+        if (down) y  -= 1;
+        if (left) x  -= 1;
+        if (right) x += 1;
         device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([x, y]));
 
-        document.querySelector('p').innerText = `${frame} / (${x}, ${y})`;
+        // Scaling. (this is definitely a nicer way of doing this)
+        if (in_) zoom += 0.01;
+        if (out) zoom -= 0.01;
+        zoom = Math.max(zoom, 1);
+        zoom = Math.min(zoom, 2);
+        device.queue.writeBuffer(zoomBuffer, 0, new Float32Array([zoom*zoom]));
+
+        document.querySelector('p').innerText = `${frame} / (${x}, ${y}) / ${zoom}`;
         ++frame;
     }
+
+
 
     // Loop.
     function loop() {
@@ -286,9 +353,8 @@ async function main() {
     requestAnimationFrame(loop);
 }
 
-
-
-// Prevent Edge's context menu.
-window.onmouseup = event => event.preventDefault();
+window.addEventListener("mouseup", function(e) {
+    e.preventDefault();
+});
 
 main().catch(err => console.error(err));
