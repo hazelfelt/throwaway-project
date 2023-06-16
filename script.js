@@ -30,7 +30,7 @@ async function main() {
 
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
-    const pixel_scale = 8;
+    const pixel_scale = 2;
     canvas.width  = canvas.clientWidth / pixel_scale;
     canvas.height = canvas.clientHeight / pixel_scale;
 
@@ -163,7 +163,8 @@ async function main() {
     for (let y = 0; y < 16; ++y) {
         for (let x = 0; x < 16; ++x) {
             let offset = y*16 + x;
-            chunkArray.set([4], offset);
+            let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 9;
+            chunkArray.set([texture], offset);
         }
     }
     device.queue.writeBuffer(chunkBuffer, 0, chunkArray);
@@ -173,32 +174,32 @@ async function main() {
         size: 2*4, // one vec2f
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(chunkOffsetBuffer, 0, new Float32Array([0.0, 0.0]));
+    device.queue.writeBuffer(chunkOffsetBuffer, 0, new Int32Array([0, 0]));
 
-    // // Another chunk buffer.
-    // const anotherChunkBuffer = device.createBuffer({
-    //     label: "another chunk storage buffer",
-    //     size: 16*16*4, // 16x16 grid of u32s
-    //     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    // });
+    // Another chunk buffer.
+    const anotherChunkBuffer = device.createBuffer({
+        label: "another chunk storage buffer",
+        size: 16*16*4, // 16x16 grid of u32s
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
 
-    // const anotherChunkArray = new Uint32Array(16*16);
-    // for (let y = 0; y < 16; ++y) {
-    //     for (let x = 0; x < 16; ++x) {
-    //         let offset = y*16 + x;
-    //         // let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 8;
-    //         let texture = 2;
-    //         anotherChunkArray.set([texture], offset);
-    //     }
-    // }
-    // device.queue.writeBuffer(anotherChunkBuffer, 0, anotherChunkArray);
+    const anotherChunkArray = new Uint32Array(16*16);
+    for (let y = 0; y < 16; ++y) {
+        for (let x = 0; x < 16; ++x) {
+            let offset = y*16 + x;
+            // let texture = Math.sqrt((x-32)*(x-32)+(y-16)*(y-16)) % 8;
+            let texture = 2;
+            anotherChunkArray.set([texture], offset);
+        }
+    }
+    device.queue.writeBuffer(anotherChunkBuffer, 0, anotherChunkArray);
 
-    // const anotherChunkOffsetBuffer = device.createBuffer({
-    //     label: "another chunk offset buffer",
-    //     size: 2*4, // one vec2f
-    //     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    // });
-    // device.queue.writeBuffer(anotherChunkOffsetBuffer, 0, new Float32Array([-1.0, 0.0]));
+    const anotherChunkOffsetBuffer = device.createBuffer({
+        label: "another chunk offset buffer",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(anotherChunkOffsetBuffer, 0, new Int32Array([-1, 0]));
 
     // Bind groups.
     const bindGroup = device.createBindGroup({
@@ -223,14 +224,14 @@ async function main() {
         ],
     });
 
-    // const anotherChunkBindGroup = device.createBindGroup({
-    //     label: "another chunk bind group",
-    //     layout: pipeline.getBindGroupLayout(1),
-    //     entries: [
-    //         {binding: 0, resource: {buffer: anotherChunkBuffer}},
-    //         {binding: 1, resource: {buffer: anotherChunkOffsetBuffer}},
-    //     ],
-    // });
+    const anotherChunkBindGroup = device.createBindGroup({
+        label: "another chunk bind group",
+        layout: pipeline.getBindGroupLayout(1),
+        entries: [
+            {binding: 0, resource: {buffer: anotherChunkBuffer}},
+            {binding: 1, resource: {buffer: anotherChunkOffsetBuffer}},
+        ],
+    });
 
 
     function render() {
@@ -256,8 +257,8 @@ async function main() {
         pass.setBindGroup(1, chunkBindGroup);
         pass.draw(4);
 
-        // pass.setBindGroup(1, anotherChunkBindGroup);
-        // pass.draw(4);
+        pass.setBindGroup(1, anotherChunkBindGroup);
+        pass.draw(4);
 
         pass.end();
 
@@ -311,27 +312,31 @@ async function main() {
         out = false;
     });
 
+    let input_elm = document.querySelector("input");
+    let input = 0.0;
+    input_elm.addEventListener("input", function(e) {
+        if (!isNaN(input_elm.value)) input = input_elm.value;
+    });
+
     // Camera, etc.
-    let x = 0.0
-    let y = 0.0;
-    let zoom = 1;
+    let x = 0
+    let y = 0;
+    let zoom = 2;
     let frame = 0;
 
     function update() {
 
         // Movement.
-        if (up) y    += 1.0;
-        if (down) y  -= 1.0;
-        if (left) x  -= 1.0;
-        if (right) x += 1.0;
+        if (up)    y += 1;
+        if (down)  y -= 1;
+        if (left)  x -= 1;
+        if (right) x += 1;
         device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([x, y]));
 
         // Scaling. (this is definitely a nicer way of doing this)
         if (in_) zoom += 0.01;
         if (out) zoom -= 0.01;
-        zoom = Math.max(zoom, 1);
-        zoom = Math.min(zoom, 2);
-        device.queue.writeBuffer(zoomBuffer, 0, new Float32Array([zoom*zoom]));
+        device.queue.writeBuffer(zoomBuffer, 0, new Float32Array([zoom]));
 
         document.querySelector('p').innerText = `${frame} / (${x}, ${y}) / ${zoom}`;
         ++frame;
