@@ -189,7 +189,7 @@ async function main() {
             for (let y = 0; y < 16; ++y) {
                 for (let x = 0; x < 16; ++x) {
                     let offset = y*16 + x;
-                    let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 9;
+                    let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 4 + 4;
                     chunk.array.set([texture], offset);
                 }
             }
@@ -303,10 +303,10 @@ async function main() {
         array: new Float32Array([this.x, this.y]),
 
         update() {
-            if (up)    this.focus_y += 2;
-            if (down)  this.focus_y -= 2;
-            if (left)  this.focus_x -= 2;
-            if (right) this.focus_x += 2;
+            if (up)    this.focus_y += 6;
+            if (down)  this.focus_y -= 6;
+            if (left)  this.focus_x -= 6;
+            if (right) this.focus_x += 6;
 
             this.x += (this.focus_x - this.x) * 0.1;
             this.y += (this.focus_y - this.y) * 0.1;
