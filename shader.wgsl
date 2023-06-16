@@ -3,7 +3,6 @@
 @group(0) @binding(2) var<uniform> atlas_size: vec2u;
 @group(0) @binding(3) var<uniform> resolution: vec2f;
 @group(0) @binding(4) var<uniform> camera: vec2f;
-@group(0) @binding(5) var<uniform> zoom: f32;
 
 @group(1) @binding(0) var<storage, read> chunk: array<array<u32, 16>, 16>;
 @group(1) @binding(1) var<uniform> chunk_coords: vec2i;
@@ -15,7 +14,7 @@ struct Vertex {
 
 @vertex fn main_vertex(@location(0) chunk_pixel: vec2f) -> Vertex {
     let pixel = vec2i(chunk_pixel) - vec2i(round(camera)) + chunk_coords * 16 * 8; // pixel space
-    let clip_pos = vec2f(pixel) * zoom * 2.0 / resolution; // clip space
+    let clip_pos = vec2f(pixel) * 2.0 / resolution; // clip space
 
     return Vertex(
         vec4f(clip_pos, 0.0, 1.0),
