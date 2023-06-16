@@ -245,7 +245,6 @@ async function main() {
 
         pass.end();
 
-        // We're done. Form a command buffer from `encoder`, and submit it.
         device.queue.submit([encoder.finish()]);
     }
 
