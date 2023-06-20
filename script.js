@@ -157,6 +157,8 @@ async function main() {
         },
 
         createChunk(pos) {
+            console.log(`created a chunk at ${pos}`);
+
             let posBuffer = device.createBuffer({
                 label: `chunk (${pos[0]}, ${pos[1]}) position uniform buffer`,
                 size: 2*4, // one vec2f
@@ -224,14 +226,12 @@ async function main() {
         const encoder = device.createCommandEncoder({ label: 'encoder' });
         const pass = encoder.beginRenderPass({
             label: 'render pass',
-            colorAttachments: [
-                { // We're rendering to the canvas's current texture.
-                    view: context.getCurrentTexture().createView(),
-                    clearValue: [0.02, 0.05, 0.1, 1.0],
-                    loadOp: 'clear',
-                    storeOp: 'store',
-                },
-            ],
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                clearValue: [0.02, 0.05, 0.1, 1.0],
+                loadOp: 'clear',
+                storeOp: 'store',
+            }],
         });
 
         pass.setPipeline(pipeline);
@@ -251,47 +251,11 @@ async function main() {
 
 
     // Controls
-    let up = false;
-    let left = false;
-    let down = false;
-    let right = false;
+    let keysDown = new Set();
 
-    let in_ = false;
-    let out = false;
-
-    window.addEventListener("keydown", function(e) {
-        switch (e.key.toLowerCase()) {
-            case "w": up    = true; break;
-            case "a": left  = true; break;
-            case "s": down  = true; break;
-            case "d": right = true; break;
-
-            case "shift": in_ = true; break;
-            case " ":     out = true; break;
-        }
-    });
-
-    window.addEventListener("keyup", function(e) {
-        switch (e.key.toLowerCase()) {
-            case "w": up    = false; break;
-            case "a": left  = false; break;
-            case "s": down  = false; break;
-            case "d": right = false; break;
-
-            case "shift": in_ = false; break;
-            case " ":     out = false; break;
-        }
-    });
-
-    window.addEventListener("blur", function(e) {
-        up    = false;
-        left  = false;
-        down  = false;
-        right = false;
-
-        in_ = false;
-        out = false;
-    });
+    window.addEventListener("keydown", function(e) { keysDown.add(e.key); });
+    window.addEventListener("keyup", function(e) { keysDown.delete(e.key); });
+    window.addEventListener("blur", function() { keysDown.clear() });
 
     let frame = 0;
     let camera = {
@@ -302,10 +266,10 @@ async function main() {
         array: new Float32Array([this.x, this.y]),
 
         update() {
-            if (up)    this.focus_y += 6;
-            if (down)  this.focus_y -= 6;
-            if (left)  this.focus_x -= 6;
-            if (right) this.focus_x += 6;
+            if (keysDown.has("w")) this.focus_y += 6;
+            if (keysDown.has("a")) this.focus_x -= 6;
+            if (keysDown.has("s")) this.focus_y -= 6;
+            if (keysDown.has("d")) this.focus_x += 6;
 
             this.x += (this.focus_x - this.x) * 0.1;
             this.y += (this.focus_y - this.y) * 0.1;
