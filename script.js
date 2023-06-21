@@ -150,15 +150,14 @@ async function main() {
         chunks: new Map(),
 
         get(pos) {
-            if (!this.chunks.has(pos)) this.chunks.set(pos, this.createChunk(pos));
+            let posString = pos.toString();
+            if (!this.chunks.has(posString)) this.chunks.set(posString, this.createChunk(pos));
 
-            let chunk = this.chunks.get(pos);
+            let chunk = this.chunks.get(posString);
             return chunk;
         },
 
         createChunk(pos) {
-            console.log(`created a chunk at ${pos}`);
-
             let posBuffer = device.createBuffer({
                 label: `chunk (${pos[0]}, ${pos[1]}) position uniform buffer`,
                 size: 2*4, // one vec2f
@@ -190,9 +189,11 @@ async function main() {
 
             for (let y = 0; y < 16; ++y) {
                 for (let x = 0; x < 16; ++x) {
-                    let offset = y*16 + x;
-                    let texture = Math.sqrt(x*x+(y-16)*(y-16)) % 4 + 4;
-                    chunk.array.set([texture], offset);
+                    let cx = x + 0.5 + pos[0]*16;
+                    let cy = y + 0.5 + pos[1]*16;
+                    let texture = Math.sqrt(cx*cx+cy*cy) % 4 + 4;
+
+                    chunk.array.set([texture], y*16 + x);
                 }
             }
 
@@ -220,42 +221,13 @@ async function main() {
 
 
 
-    // Rendering.
-    function render() {
-
-        const encoder = device.createCommandEncoder({ label: 'encoder' });
-        const pass = encoder.beginRenderPass({
-            label: 'render pass',
-            colorAttachments: [{
-                view: context.getCurrentTexture().createView(),
-                clearValue: [0.02, 0.05, 0.1, 1.0],
-                loadOp: 'clear',
-                storeOp: 'store',
-            }],
-        });
-
-        pass.setPipeline(pipeline);
-        pass.setVertexBuffer(0, vertexBuffer);
-        pass.setBindGroup(0, bindGroup);
-
-        for (let i = -2; i <= 2; ++i) {
-            pass.setBindGroup(1, chunks.get([0, i]).bindGroup);
-            pass.draw(4);
-        }
-
-        pass.end();
-
-        device.queue.submit([encoder.finish()]);
-    }
-
-
-
     // Controls
     let keysDown = new Set();
 
     window.addEventListener("keydown", function(e) { keysDown.add(e.key); });
     window.addEventListener("keyup", function(e) { keysDown.delete(e.key); });
     window.addEventListener("blur", function() { keysDown.clear() });
+    // window.addEventListener("")
 
     let frame = 0;
     let camera = {
@@ -283,6 +255,40 @@ async function main() {
         camera.update();
         document.querySelector('p').innerText = `${frame} / (${camera.focus_x}, ${camera.focus_y})`;
         ++frame;
+    }
+
+
+
+    // Rendering.
+    function render() {
+
+        const encoder = device.createCommandEncoder({ label: 'encoder' });
+        const pass = encoder.beginRenderPass({
+            label: 'render pass',
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                clearValue: [0.02, 0.05, 0.1, 1.0],
+                loadOp: 'clear',
+                storeOp: 'store',
+            }],
+        });
+
+        pass.setPipeline(pipeline);
+        pass.setVertexBuffer(0, vertexBuffer);
+        pass.setBindGroup(0, bindGroup);
+
+        let x = Math.floor(camera.focus_x / 8 / 16);
+        let y = Math.floor(camera.focus_y / 8 / 16);
+        for (let i = x-1; i <= x+1; ++i) {
+            for (let j = y-1; j <= y+1; ++j) {
+                pass.setBindGroup(1, chunks.get([i, j]).bindGroup);
+                pass.draw(4);
+            }
+        }
+
+        pass.end();
+
+        device.queue.submit([encoder.finish()]);
     }
 
 
