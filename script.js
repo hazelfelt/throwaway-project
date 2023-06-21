@@ -36,8 +36,8 @@ async function main() {
         });
     }
 
-    let tileModule = createModule('/tile.wgsl', 'tile');
-    let spriteModule = createModule('/sprite.wgsl', 'sprite');
+    let tileModule = await createModule('/tile.wgsl', 'tile');
+    let spriteModule = await createModule('/sprite.wgsl', 'sprite');
 
 
 
@@ -77,13 +77,14 @@ async function main() {
             buffers: [{
                 // vec2f ----  u32-  padding
                 // xxxx  xxxx  xxxx  xxxx
+                stepMode: "instance",
                 arrayStride: 4*4,
                 attributes: [{
                     shaderLocation: 0,
                     offset: 0,
                     format: 'float32x2',
                 }, {
-                    shaderLocation: 0,
+                    shaderLocation: 1,
                     offset: 8,
                     format: 'uint32',
                 }],
@@ -92,9 +93,50 @@ async function main() {
         fragment: {
             module: spriteModule,
             entryPoint: 'main_fragment',
-            targets: [{format: canvasFormat}],
+            targets: [{
+                format: canvasFormat,
+
+                // this blending *could* cause problems in the future, i haven't thought about it hard enough
+                // specifically- colors might be wrong if the source color has semi-transparent pixels that
+                // are not premultiplied (i.e. colors taken from atlas pngs'.)
+                blend: {
+                    color: {
+                        operation: "add",
+                        srcFactor: "one",
+                        dstFactor: "one-minus-src-alpha",
+                    },
+                    alpha: {
+                        operation: "add",
+                        srcFactor: "one",
+                        dstFactor: "one-minus-src-alpha",
+                    }
+                },
+            }],
         },
     });
+
+
+
+    // Resolution buffer.
+    const resolutionBuffer = device.createBuffer({
+        label: "canvas resolution uniform",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(
+        resolutionBuffer, 0,
+        new Float32Array([canvas.width, canvas.height])
+    );
+
+
+
+    // Camera buffer.
+    const cameraBuffer = device.createBuffer({
+        label: "camera uniform",
+        size: 2*4, // one vec2f
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([0, 0]));
 
 
 
@@ -128,7 +170,7 @@ async function main() {
 
     const sampler = device.createSampler({magFilter: 'nearest'});
     let [tileAtlasTexture, tileAtlasSizeBuffer] = await createAtlas("tiles", "tile", [4, 4]);
-    let [spriteAtlasTexture, spriteAtlasSizeBuffer] = await createAtlas("sprites", "sprite", [4, 4]);
+    let [spriteAtlasTexture, spriteAtlasSizeBuffer] = await createAtlas("sprites", "sprite", [54, 19]);
 
 
 
@@ -149,41 +191,52 @@ async function main() {
     );
 
     // Sprites vertex buffer.
-    const spriteCount = 2;
+    const spriteCount = 10;
     const spritesBuffer = device.createBuffer({
         label: "sprites vertex buffer",
         size: spriteCount*4*4,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-
     let spritesByteArray = new ArrayBuffer(spriteCount*4*4);
     let spritesFloat32Array = new Float32Array(spritesByteArray);
     let spritesUint32Array = new Uint32Array(spritesByteArray);
     for (let i = 0; i < spriteCount; ++i) {
-        spritesFloat32Array.set([i*10, i*10], i*4*4);
-        spritesUint32Array.set([1], i*4*4 + 8);
+        spritesFloat32Array.set([i*20-80, i*10-40], i*4);
+        spritesUint32Array.set([i%3], i*4 + 2);
     }
     device.queue.writeBuffer(spritesBuffer, 0, spritesByteArray);
 
-    // Sprite size + atlas location map buffer.
-    const spriteAtlasMapBuffer = device.createBuffer({
-        label: "sprite atlas location & size map buffer",
-        size: 2*3*2*4, // 2 maps x textures x vec2u
+    // Sprite location map storage buffer.
+    const spriteLocationMapBuffer = device.createBuffer({
+        label: "sprite location map storage buffer",
+        size: 3*2*4,
         usage: GPUBufferUsage.STORAGE |  GPUBufferUsage.COPY_DST,
     });
-    device.writeBuffer(spriteAtlasMapBuffer, 0, new Uint32Array([
-        0,  0, 20, 12,
-        20, 0, 18, 15,
-        38, 0, 16, 19,
+    device.queue.writeBuffer(spriteLocationMapBuffer, 0, new Uint32Array([
+        0,  0,
+        20, 0,
+        38, 0,
+    ]));
+
+    // Sprite size map storage buffer.
+    const spriteSizeMapBuffer = device.createBuffer({
+        label: "sprite size map storage buffer",
+        size: 3*2*4,
+        usage: GPUBufferUsage.STORAGE |  GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(spriteSizeMapBuffer, 0, new Uint32Array([
+        20, 12,
+        18, 15,
+        16, 19,
     ]));
 
     // Sprite corner buffer.
     const cornersBuffer = device.createBuffer({
-        label: "corners uniform buffer",
+        label: "corners storage buffer",
         size: 2*4*4,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(cornersBuffer, 0, new Float32Array([
+    device.queue.writeBuffer(cornersBuffer, 0, new Uint32Array([
         0, 0,
         0, 1,
         1, 0,
@@ -212,8 +265,8 @@ async function main() {
             {binding: 0, resource: spriteAtlasTexture.createView()},
             {binding: 1, resource: sampler},
             {binding: 2, resource: {buffer: spriteAtlasSizeBuffer}},
-            {binding: 3, resource: {buffer: spriteAtlasMapBuffer, offset: 2*4, }},
-            {binding: 4, resource: {buffer: spriteAtlasMapBuffer, }},
+            {binding: 3, resource: {buffer: spriteLocationMapBuffer}},
+            {binding: 4, resource: {buffer: spriteSizeMapBuffer}},
             {binding: 5, resource: {buffer: cornersBuffer}},
 
             {binding: 6, resource: {buffer: resolutionBuffer}},
@@ -386,11 +439,12 @@ async function main() {
             }],
         });
 
+        // Tiles.
         pass.setPipeline(tilePipeline);
         pass.setVertexBuffer(0, chunkPixelBuffer);
         pass.setBindGroup(0, tileBindGroup);
 
-        // Draw the 9 nearest chunks.
+        // Draw the nearest 9 chunks.
         let x = Math.floor(camera.x / 8 / 16);
         let y = Math.floor(camera.y / 8 / 16);
         for (let i = x-1; i <= x+1; ++i) {
@@ -399,6 +453,13 @@ async function main() {
                 pass.draw(4);
             }
         }
+        // pass.setBindGroup(1, null);
+
+        // Sprites.
+        pass.setPipeline(spritePipeline);
+        pass.setVertexBuffer(0, spritesBuffer);
+        pass.setBindGroup(0, spriteBindGroup);
+        pass.draw(4, spriteCount);
 
         pass.end();
         device.queue.submit([encoder.finish()]);
