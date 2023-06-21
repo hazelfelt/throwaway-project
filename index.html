@@ -4,14 +4,14 @@
     <script src="script.js" defer></script>
     <style>
         html {
-            /* make the html document take the whole page's height, not just a portion of it. */
-            /* (needed to vertically center the canvas) */
+            /* take the whole page's height, not just a portion of it. */
+            /* (necessary to center the canvas vertically) */
             height: 100%
         }
         body {
-            margin: 0;      /* there's a tiny margin around the body by default, so remove it */
+            margin: 0;      /* remove default margin */
             background-color: black;
-            display: flex;  /* lets us center the canvas vertically */
+            display: flex;  /* to center the canvas vertically */
             flex-direction: column;
             height: 100%;
             image-rendering: pixelated;
@@ -27,18 +27,17 @@
             font-family: monospace;
             color: darkslategrey;
             user-select: none;
-
-            /* messy margin layout stuff (i'll make this nicer in the future) */
-            margin-top: 0;
-            margin-left: auto;
-            margin-right: auto;
+            margin: 0, auto;
         }
     </style>
 </head>
 
 <body>
-    <img src="atlas.png" style="display: none;"> <!-- should replace this w/ javascript eventually -->
+    <img id="tiles"   src="tiles.png"   style="display: none;">
+    <img id="sprites" src="sprites.png" style="display: none;">
+
     <canvas></canvas>
+
     <p id="stats"></p>
     <p id="mouse"></p>
 </body>

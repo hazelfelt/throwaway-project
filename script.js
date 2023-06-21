@@ -16,7 +16,7 @@ async function main() {
     // Canvas and WebGPU context.
     const canvas = document.querySelector('canvas');
     const pixel_scale = 4;
-    canvas.width  = canvas.clientWidth / pixel_scale;
+    canvas.width = canvas.clientWidth / pixel_scale;
     canvas.height = canvas.clientHeight / pixel_scale;
 
     const context = canvas.getContext('webgpu');
@@ -28,50 +28,118 @@ async function main() {
 
 
 
-    // Chunk rendering shader.
-    const wgsl = await fetchText('/shader.wgsl');
-    const module = device.createShaderModule({
-        label: "chunk shader",
-        code: wgsl,
-    });
+    // Modules.
+    async function createModule(file, noun) {
+        return device.createShaderModule({
+            label: `${noun} shader`,
+            code: await fetchText(file),
+        });
+    }
+
+    let tileModule = createModule('/tile.wgsl', 'tile');
+    let spriteModule = createModule('/sprite.wgsl', 'sprite');
 
 
 
-    // Pipeline.
-    const pipeline = device.createRenderPipeline({
-        label: "chunk rendering pipeline",
+    // Pipelines.
+    const tilePipeline = device.createRenderPipeline({
+        label: "tile rendering pipeline",
         layout: 'auto',
-        primitive: { topology: "triangle-strip" },
+        primitive: {topology: "triangle-strip"},
         vertex: {
-            module,
+            module: tileModule,
             entryPoint: 'main_vertex',
             buffers: [{
+                // vec2f ----
+                // xxxx  xxxx
                 arrayStride: 2*4,
                 attributes: [{
                     shaderLocation: 0,
                     offset: 0,
-                    format: 'float32x2'
-                }]
+                    format: 'float32x2',
+                }],
             }],
         },
         fragment: {
-            module,
+            module: tileModule,
             entryPoint: 'main_fragment',
-            targets: [{ format: canvasFormat }],
+            targets: [{format: canvasFormat}],
+        },
+    });
+
+    const spritePipeline = device.createRenderPipeline({
+        label: "sprite rendering pipeline",
+        layout: 'auto',
+        primitive: {topology: "triangle-strip"},
+        vertex: {
+            module: spriteModule,
+            entryPoint: 'main_vertex',
+            buffers: [{
+                // vec2f ----  u32-  padding
+                // xxxx  xxxx  xxxx  xxxx
+                arrayStride: 4*4,
+                attributes: [{
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: 'float32x2',
+                }, {
+                    shaderLocation: 0,
+                    offset: 8,
+                    format: 'uint32',
+                }],
+            }],
+        },
+        fragment: {
+            module: spriteModule,
+            entryPoint: 'main_fragment',
+            targets: [{format: canvasFormat}],
         },
     });
 
 
 
-    // ...Buffers.
-    // Vertex buffer.
-    const vertexBuffer = device.createBuffer({
-        label: "vertex buffer",
+    // Tile and sprite atlases.
+    async function createAtlas(id, noun, size) {
+        const element = document.querySelector(`#${id}`);
+        const source = await createImageBitmap(element, {colorSpaceConversion: "none"});
+        const texture = device.createTexture({
+            label: `${noun} atlas texture`,
+            format: 'rgba8unorm',
+            size: [source.width, source.height],
+            usage: GPUTextureUsage.TEXTURE_BINDING |
+                GPUTextureUsage.COPY_DST |
+                GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        device.queue.copyExternalImageToTexture(
+            {source},
+            {texture},
+            {width: source.width, height: source.height},
+        );
+
+        const sizeBuffer = device.createBuffer({
+            label: `${noun} atlas size uniform`,
+            size: 2*4, // one vec2u
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        device.queue.writeBuffer(sizeBuffer, 0, new Uint32Array(size));
+
+        return [texture, sizeBuffer];
+    }
+
+    const sampler = device.createSampler({magFilter: 'nearest'});
+    let [tileAtlasTexture, tileAtlasSizeBuffer] = await createAtlas("tiles", "tile", [4, 4]);
+    let [spriteAtlasTexture, spriteAtlasSizeBuffer] = await createAtlas("sprites", "sprite", [4, 4]);
+
+
+
+    // Chunk pixel vertex buffer.
+    const chunkPixelBuffer = device.createBuffer({
+        label: "chunk pixel vertex buffer",
         size: 2*4*4,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(
-        vertexBuffer, 0,
+        chunkPixelBuffer, 0,
         new Float32Array([
             0, 0,
             0, 128,
@@ -80,53 +148,78 @@ async function main() {
         ])
     );
 
-    // Atlas .png file and sampler.
-    const atlasElement = document.querySelector("img");
-    const source = await createImageBitmap(atlasElement, { colorSpaceConversion: "none" });
-    const texture = device.createTexture({
-        label: "atlas texture",
-        format: 'rgba8unorm',
-        size: [source.width, source.height],
-        usage: GPUTextureUsage.TEXTURE_BINDING |
-            GPUTextureUsage.COPY_DST |
-            GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    device.queue.copyExternalImageToTexture(
-        { source, flipY: false },
-        { texture },
-        { width: source.width, height: source.height },
-    );
-
-    const sampler = device.createSampler({
-        magFilter: 'nearest',
+    // Sprites vertex buffer.
+    const spriteCount = 2;
+    const spritesBuffer = device.createBuffer({
+        label: "sprites vertex buffer",
+        size: spriteCount*4*4,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
 
-    // Atlas size buffer.
-    const atlasSizeBuffer = device.createBuffer({
-        label: "atlas size uniform",
-        size: 2*4, // one vec2u
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(atlasSizeBuffer, 0, new Uint32Array([4, 4]));
+    let spritesByteArray = new ArrayBuffer(spriteCount*4*4);
+    let spritesFloat32Array = new Float32Array(spritesByteArray);
+    let spritesUint32Array = new Uint32Array(spritesByteArray);
+    for (let i = 0; i < spriteCount; ++i) {
+        spritesFloat32Array.set([i*10, i*10], i*4*4);
+        spritesUint32Array.set([1], i*4*4 + 8);
+    }
+    device.queue.writeBuffer(spritesBuffer, 0, spritesByteArray);
 
-    // Resolution buffer.
-    const resolutionBuffer = device.createBuffer({
-        label: "canvas resolution uniform",
-        size: 2*4, // one vec2f
+    // Sprite size + atlas location map buffer.
+    const spriteAtlasMapBuffer = device.createBuffer({
+        label: "sprite atlas location & size map buffer",
+        size: 2*3*2*4, // 2 maps x textures x vec2u
+        usage: GPUBufferUsage.STORAGE |  GPUBufferUsage.COPY_DST,
+    });
+    device.writeBuffer(spriteAtlasMapBuffer, 0, new Uint32Array([
+        0,  0, 20, 12,
+        20, 0, 18, 15,
+        38, 0, 16, 19,
+    ]));
+
+    // Sprite corner buffer.
+    const cornersBuffer = device.createBuffer({
+        label: "corners uniform buffer",
+        size: 2*4*4,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(
-        resolutionBuffer, 0,
-        new Float32Array([canvas.width, canvas.height])
-    );
+    device.queue.writeBuffer(cornersBuffer, 0, new Float32Array([
+        0, 0,
+        0, 1,
+        1, 0,
+        1, 1,
+    ]));
 
-    // Camera buffer.
-    const cameraBuffer = device.createBuffer({
-        label: "camera uniform",
-        size: 2*4, // one vec2f
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+
+
+    // Bind groups.
+    const tileBindGroup = device.createBindGroup({
+        label: "tile bind group",
+        layout: tilePipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: tileAtlasTexture.createView()},
+            {binding: 1, resource: sampler},
+            {binding: 2, resource: {buffer: tileAtlasSizeBuffer}},
+            {binding: 3, resource: {buffer: resolutionBuffer}},
+            {binding: 4, resource: {buffer: cameraBuffer}},
+        ]
     });
-    device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([0, 0]));
+
+    const spriteBindGroup = device.createBindGroup({
+        label: "sprite bind group",
+        layout: spritePipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: spriteAtlasTexture.createView()},
+            {binding: 1, resource: sampler},
+            {binding: 2, resource: {buffer: spriteAtlasSizeBuffer}},
+            {binding: 3, resource: {buffer: spriteAtlasMapBuffer, offset: 2*4, }},
+            {binding: 4, resource: {buffer: spriteAtlasMapBuffer, }},
+            {binding: 5, resource: {buffer: cornersBuffer}},
+
+            {binding: 6, resource: {buffer: resolutionBuffer}},
+            {binding: 7, resource: {buffer: cameraBuffer}},
+        ]
+    });
 
 
 
@@ -138,7 +231,7 @@ async function main() {
         if (!chunks.has(string)) chunks.set(string, createChunk(x, y));
         let chunk = chunks.get(string);
         return chunk;
-    };
+    }
 
     function createChunk(x, y) {
         let posBuffer = device.createBuffer({
@@ -155,7 +248,7 @@ async function main() {
 
         let bindGroup = device.createBindGroup({
             label: `chunk (${x}, ${y}) bind group`,
-            layout: pipeline.getBindGroupLayout(1),
+            layout: tilePipeline.getBindGroupLayout(1),
             entries: [
                 {binding: 0, resource: {buffer: buffer}},
                 {binding: 1, resource: {buffer: posBuffer}},
@@ -187,11 +280,11 @@ async function main() {
         device.queue.writeBuffer(chunk.posBuffer, 0, new Int32Array([x, y]));
 
         return chunk;
-    };
+    }
 
     function setTile(x, y) {
-        let relX = x - 16*Math.floor(x / 16);
-        let relY = y - 16*Math.floor(y / 16);
+        let relX = x - 16*Math.floor(x/16);
+        let relY = y - 16*Math.floor(y/16);
         let chunk = getChunk(Math.floor(x/16), Math.floor(y/16));
 
         chunk.array.set([8], relY*16 + relX);
@@ -200,18 +293,8 @@ async function main() {
 
 
 
-    // Bind group.
-    const bindGroup = device.createBindGroup({
-        label: "bind group",
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-            {binding: 0, resource: texture.createView()},
-            {binding: 1, resource: sampler},
-            {binding: 2, resource: {buffer: atlasSizeBuffer}},
-            {binding: 3, resource: {buffer: resolutionBuffer}},
-            {binding: 4, resource: {buffer: cameraBuffer}},
-        ]
-    });
+    // Sprites.
+    let sprites = [];
 
 
 
@@ -303,9 +386,9 @@ async function main() {
             }],
         });
 
-        pass.setPipeline(pipeline);
-        pass.setVertexBuffer(0, vertexBuffer);
-        pass.setBindGroup(0, bindGroup);
+        pass.setPipeline(tilePipeline);
+        pass.setVertexBuffer(0, chunkPixelBuffer);
+        pass.setBindGroup(0, tileBindGroup);
 
         // Draw the 9 nearest chunks.
         let x = Math.floor(camera.x / 8 / 16);
