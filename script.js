@@ -1,18 +1,3 @@
-// TODO: there's some really weird texture bleeding(??) going on??
-// *specifically* when i nudge the chunk down by like. 1.6 pixels.
-// Then there's an extra row of garbage pixels at the very top
-//
-// im not sure why it's happening but im way too tired tonight to bother figuring it out lol
-//
-// it's definitely due to some floating point magic, though.
-// maybe due to the fact that, there's a Lotta mingling of u32's AND f32's in the fragment shader?
-// maybe it's because [one of the coordinate systems im using] is centered on 0.0, 0.0, instead of 0.5, 0.5(??)
-//
-// i dont know. that's just me throwing stuff at the wall. it's for future me to figure out.
-
-// ALSO TODO:
-// make sure both chunks get rendered, rn they're perfectly superimposed on top of each other lol
-
 async function fetchText(url) {
     const response = await fetch(url);
     const text = await response.text();
@@ -122,7 +107,7 @@ async function main() {
         size: 2*4, // one vec2u
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(atlasSizeBuffer, 0, new Uint32Array([3, 3]));
+    device.queue.writeBuffer(atlasSizeBuffer, 0, new Uint32Array([4, 4]));
 
     // Resolution buffer.
     const resolutionBuffer = device.createBuffer({
@@ -146,63 +131,72 @@ async function main() {
 
 
     // Chunks.
-    let chunks = {
-        chunks: new Map(),
+    let chunks = new Map();
 
-        get(pos) {
-            let posString = pos.toString();
-            if (!this.chunks.has(posString)) this.chunks.set(posString, this.createChunk(pos));
-
-            let chunk = this.chunks.get(posString);
-            return chunk;
-        },
-
-        createChunk(pos) {
-            let posBuffer = device.createBuffer({
-                label: `chunk (${pos[0]}, ${pos[1]}) position uniform buffer`,
-                size: 2*4, // one vec2f
-                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            });
-
-            let buffer = device.createBuffer({
-                label: `chunk (${pos[0]}, ${pos[1]}) storage buffer`,
-                size: 16*16*4, // 16x16 grid of u32s
-                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-            });
-
-            let bindGroup = device.createBindGroup({
-                label: `chunk (${pos[0]}, ${pos[1]}) bind group`,
-                layout: pipeline.getBindGroupLayout(1),
-                entries: [
-                    {binding: 0, resource: {buffer: buffer}},
-                    {binding: 1, resource: {buffer: posBuffer}},
-                ],
-            });
-
-            let chunk = {
-                pos,
-                posBuffer,
-                array: new Uint32Array(16*16),
-                buffer,
-                bindGroup,
-            };
-
-            for (let y = 0; y < 16; ++y) {
-                for (let x = 0; x < 16; ++x) {
-                    let cx = x + 0.5 + pos[0]*16;
-                    let cy = y + 0.5 + pos[1]*16;
-                    let texture = Math.sqrt(cx*cx+cy*cy) % 4 + 4;
-
-                    chunk.array.set([texture], y*16 + x);
-                }
-            }
-
-            device.queue.writeBuffer(chunk.buffer, 0, chunk.array);
-            device.queue.writeBuffer(chunk.posBuffer, 0, new Int32Array(chunk.pos));
-
-            return chunk;
-        },
+    function getChunk(x, y) {
+        let string = `${x}, ${y}`;
+        if (!chunks.has(string)) chunks.set(string, createChunk(x, y));
+        let chunk = chunks.get(string);
+        return chunk;
     };
+
+    function createChunk(x, y) {
+        let posBuffer = device.createBuffer({
+            label: `chunk (${x}, ${y}) position uniform buffer`,
+            size: 2*4, // one vec2f
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        let buffer = device.createBuffer({
+            label: `chunk (${x}, ${y}) storage buffer`,
+            size: 16*16*4, // 16x16 grid of u32s
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        let bindGroup = device.createBindGroup({
+            label: `chunk (${x}, ${y}) bind group`,
+            layout: pipeline.getBindGroupLayout(1),
+            entries: [
+                {binding: 0, resource: {buffer: buffer}},
+                {binding: 1, resource: {buffer: posBuffer}},
+            ],
+        });
+
+        let chunk = {
+            x, y,
+            posBuffer,
+            array: new Uint32Array(16*16),
+            buffer,
+            bindGroup,
+        };
+
+        // Determine tile textures.
+        for (let y = 0; y < 16; ++y) {
+            for (let x = 0; x < 16; ++x) {
+
+                // World-relative coordinates, centered at 0.5, 0.5 on the tile.
+                let cx = x + 0.5 + chunk.x*16;
+                let cy = y + 0.5 + chunk.y*16;
+                let texture = Math.sqrt(cx*cx+cy*cy) % 4 + 12; // circle-y worldgen
+
+                chunk.array.set([texture], y*16 + x);
+            }
+        }
+
+        device.queue.writeBuffer(chunk.buffer, 0, chunk.array);
+        device.queue.writeBuffer(chunk.posBuffer, 0, new Int32Array([x, y]));
+
+        return chunk;
+    };
+
+    function setTile(x, y) {
+        let relX = x - 16*Math.floor(x / 16);
+        let relY = y - 16*Math.floor(y / 16);
+        let chunk = getChunk(Math.floor(x/16), Math.floor(y/16));
+
+        chunk.array.set([8], relY*16 + relX);
+        device.queue.writeBuffer(chunk.buffer, 0, chunk.array);
+    }
 
 
 
@@ -223,11 +217,16 @@ async function main() {
 
     // Controls
     let keysDown = new Set();
+    let mouseDown = false;
+    let mousePos = null;
 
     window.addEventListener("keydown", function(e) { keysDown.add(e.key); });
     window.addEventListener("keyup", function(e) { keysDown.delete(e.key); });
-    window.addEventListener("blur", function() { keysDown.clear() });
-    // window.addEventListener("")
+    window.addEventListener("blur", function() {
+        keysDown.clear();
+        mousePos = null;
+        mouseDown = false;
+    });
 
     let frame = 0;
     let camera = {
@@ -251,9 +250,40 @@ async function main() {
         }
     }
 
+    canvas.addEventListener("mousemove", function(e) {
+        mousePos = {
+            x: -canvas.width/2  + e.offsetX/pixel_scale,
+            y:  canvas.height/2 - e.offsetY/pixel_scale,
+        };
+    });
+    canvas.addEventListener("mouseleave", function() { mouseDown = false; });
+    canvas.addEventListener("mouseup",    function() { mouseDown = false; });
+    canvas.addEventListener("mouseenter", function(e) { mouseDown = e.buttons & 1; });
+    canvas.addEventListener("mousedown",  function(e) {
+        mouseDown = e.buttons & 1;
+        mousePos = { // handles an edge case where the cursor is already over the canvas on page load, then user clicks
+            x: -canvas.width/2  + e.offsetX/pixel_scale,
+            y:  canvas.height/2 - e.offsetY/pixel_scale,
+        };
+    });
+
+
+
+    // Updating.
     function update() {
         camera.update();
-        document.querySelector('p').innerText = `${frame} / (${camera.focus_x}, ${camera.focus_y})`;
+        document.querySelector('#stats').innerText = `${frame} / (${camera.focus_x}, ${camera.focus_y})`;
+
+        // Clicked tile
+        if (mouseDown) {
+            let x = Math.floor((camera.x + mousePos.x) / 8);
+            let y = Math.floor((camera.y + mousePos.y) / 8);
+            setTile(x, y);
+            document.querySelector('#mouse').innerText = `tile: (${x}, ${y})`; // tile coords
+        } else {
+            document.querySelector('#mouse').innerText = `tile: ...`;
+        }
+
         ++frame;
     }
 
@@ -277,17 +307,17 @@ async function main() {
         pass.setVertexBuffer(0, vertexBuffer);
         pass.setBindGroup(0, bindGroup);
 
-        let x = Math.floor(camera.focus_x / 8 / 16);
-        let y = Math.floor(camera.focus_y / 8 / 16);
+        // Draw the 9 nearest chunks.
+        let x = Math.floor(camera.x / 8 / 16);
+        let y = Math.floor(camera.y / 8 / 16);
         for (let i = x-1; i <= x+1; ++i) {
             for (let j = y-1; j <= y+1; ++j) {
-                pass.setBindGroup(1, chunks.get([i, j]).bindGroup);
+                pass.setBindGroup(1, getChunk(i, j).bindGroup);
                 pass.draw(4);
             }
         }
 
         pass.end();
-
         device.queue.submit([encoder.finish()]);
     }
 
@@ -304,8 +334,6 @@ async function main() {
 
 
 
-window.addEventListener("mouseup", function(e) {
-    e.preventDefault();
-});
+window.addEventListener("contextmenu", function(e) { e.preventDefault(); });
 
 main().catch(err => console.error(err));
