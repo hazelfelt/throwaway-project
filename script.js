@@ -190,22 +190,6 @@ async function main() {
         ])
     );
 
-    // Sprites vertex buffer.
-    const spriteCount = 10;
-    const spritesBuffer = device.createBuffer({
-        label: "sprites vertex buffer",
-        size: spriteCount*4*4,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    });
-    let spritesByteArray = new ArrayBuffer(spriteCount*4*4);
-    let spritesFloat32Array = new Float32Array(spritesByteArray);
-    let spritesUint32Array = new Uint32Array(spritesByteArray);
-    for (let i = 0; i < spriteCount; ++i) {
-        spritesFloat32Array.set([i*20-80, i*10-40], i*4);
-        spritesUint32Array.set([i%3], i*4 + 2);
-    }
-    device.queue.writeBuffer(spritesBuffer, 0, spritesByteArray);
-
     // Sprite location map storage buffer.
     const spriteLocationMapBuffer = device.createBuffer({
         label: "sprite location map storage buffer",
@@ -323,7 +307,18 @@ async function main() {
                 // World-relative coordinates, centered at 0.5, 0.5 on the tile.
                 let cx = x + 0.5 + chunk.x*16;
                 let cy = y + 0.5 + chunk.y*16;
-                let texture = Math.sqrt(cx*cx+cy*cy) % 4 + 12; // circle-y worldgen
+
+                let texture = 0;
+                let d = Math.sqrt(cx*cx + cy*cy);
+                if (d % 24 < 4) {
+                    texture = 3;
+                } else if (d % 24 < 6) {
+                    texture = 4;
+                } else {
+                    let c = Math.round(cx*0.2 + cy*0.2);
+                    texture = (c - 4*Math.floor(c/4)) + 12;
+                }
+
 
                 chunk.array.set([texture], y*16 + x);
             }
@@ -335,19 +330,48 @@ async function main() {
         return chunk;
     }
 
-    function setTile(x, y) {
+    function setTile(x, y, texture) {
         let relX = x - 16*Math.floor(x/16);
         let relY = y - 16*Math.floor(y/16);
         let chunk = getChunk(Math.floor(x/16), Math.floor(y/16));
 
-        chunk.array.set([8], relY*16 + relX);
+        chunk.array.set([texture], relY*16 + relX);
         device.queue.writeBuffer(chunk.buffer, 0, chunk.array);
     }
 
 
 
     // Sprites.
-    let sprites = [];
+    let textureMap = new Map();
+    textureMap.set('rectangle_rock', 0);
+    textureMap.set('rock', 1);
+    textureMap.set('tooth_rock', 2);
+
+    let sprites = [
+        {x: 0,  y: 0,  texture: 'rectangle_rock'},
+        {x: 20, y: 10, texture: 'rock'          },
+        {x: 40, y: 20, texture: 'tooth_rock'    },
+        {x: 0,  y: 30, texture: 'rock'          },
+        {x: 20, y: 40, texture: 'rectangle_rock'},
+    ];
+
+    // Sprites vertex buffer.
+    const spriteCount = sprites.length;
+    const spritesBuffer = device.createBuffer({
+        label: "sprites vertex buffer",
+        size: spriteCount*4*4,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+
+    let spritesByteArray = new ArrayBuffer(spriteCount*4*4);
+    let spritesFloat32Array = new Float32Array(spritesByteArray);
+    let spritesUint32Array = new Uint32Array(spritesByteArray);
+    for (let i = 0; i < spriteCount; ++i) {
+        let sprite = sprites[i];
+        spritesFloat32Array.set([sprite.x,  sprite.y], i*4);
+        spritesUint32Array.set([textureMap.get(sprite.texture)], i*4 + 2);
+    }
+    device.queue.writeBuffer(spritesBuffer, 0, spritesByteArray);
 
 
 
@@ -373,13 +397,13 @@ async function main() {
         array: new Float32Array([this.x, this.y]),
 
         update() {
-            if (keysDown.has("w")) this.focus_y += 6;
-            if (keysDown.has("a")) this.focus_x -= 6;
-            if (keysDown.has("s")) this.focus_y -= 6;
-            if (keysDown.has("d")) this.focus_x += 6;
+            if (keysDown.has("w")) this.focus_y += 4;
+            if (keysDown.has("a")) this.focus_x -= 4;
+            if (keysDown.has("s")) this.focus_y -= 4;
+            if (keysDown.has("d")) this.focus_x += 4;
 
-            this.x += (this.focus_x - this.x) * 0.1;
-            this.y += (this.focus_y - this.y) * 0.1;
+            this.x += (this.focus_x - this.x) * 0.175;
+            this.y += (this.focus_y - this.y) * 0.175;
 
             this.array.set([this.x, this.y], 0);
             device.queue.writeBuffer(cameraBuffer, 0, this.array);
@@ -412,10 +436,18 @@ async function main() {
 
         // Clicked tile
         if (mouseDown) {
-            let x = Math.floor((camera.x + mousePos.x) / 8);
-            let y = Math.floor((camera.y + mousePos.y) / 8);
-            setTile(x, y);
-            document.querySelector('#mouse').innerText = `tile: (${x}, ${y})`; // tile coords
+            let x = (camera.x + mousePos.x) / 8;
+            let y = (camera.y + mousePos.y) / 8;
+
+            [[+.5, +.5], [+.5, -.5], [-.5, +.5], [-.5, -.5]]
+                .forEach(arr => setTile(
+                    Math.floor(x + arr[0]),
+                    Math.floor(y + arr[1]),
+                    8
+                ));
+
+            let tileCoords = `${Math.floor(x)}, ${Math.floor(y)}`;
+            document.querySelector('#mouse').innerText = `tile: (${tileCoords})`;
         } else {
             document.querySelector('#mouse').innerText = `tile: ...`;
         }
